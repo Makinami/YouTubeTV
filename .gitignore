@@ -163,3 +163,6 @@ ServiceFabricBackup/
 
 # MSBuild Binary and Structured Log
 *.binlog
+
+# Media
+*.mp4
