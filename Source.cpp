@@ -10,6 +10,11 @@ extern "C" {
 #pragma comment(lib, "swscale.lib")
 #pragma comment(lib, "avutil.lib")
 
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_thread.h>
+
+#undef main
+
 #include <stdio.h>
 
 void SaveFrame(AVFrame* pFrame, int width, int height, int iFrame) {
@@ -61,6 +66,17 @@ int decode(AVCodecContext* avctx, AVFrame* frame, int* got_frame, AVPacket* pkt)
 
 int main(int argc, char* argv[])
 {
+	if (argc < 2) {
+		fprintf(stderr, "Usage: test <file>\n");
+		return -1;
+	}
+
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER))
+	{
+		fprintf(stderr, "Could not initialize SDL- %s\n", SDL_GetError());
+		return -1;
+	}
+
 	AVFormatContext* pFormatCtx = nullptr;
 
 	// Open video file
@@ -138,10 +154,26 @@ int main(int argc, char* argv[])
 	//avpicture_fill(static_cast<AVPicture*>(pFrameRGB), buffer, AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height);
 	av_image_fill_arrays(pFrameRGB->data, pFrameRGB->linesize, buffer, AV_PIX_FMT_RGB24, pCodecCtx->width, pCodecCtx->height, 32);
 
+	auto window = SDL_CreateWindow("YouTubeTV", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, pCodecCtx->width, pCodecCtx->height, SDL_WINDOW_SHOWN);
+	if (!window)
+	{
+		fprintf(stderr, "SDL: could not create window - exiting\n");
+		return -1;
+	}
+
+	auto renderer = SDL_CreateRenderer(window, -1, 0);
+	if (!renderer)
+	{
+		fprintf(stderr, "SDL: could not create renderer - exiting\n");
+	}
+
+	auto bmp = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_YV12, SDL_TEXTUREACCESS_STATIC, pCodecCtx->width, pCodecCtx->height);
+
 	SwsContext* sws_ctx = sws_getContext(pCodecCtx->width, pCodecCtx->height, pCodecCtx->pix_fmt,
 		pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
 
 	AVPacket packet;
+	SDL_Event event;
 
 	int frameFinnished = 0;
 	int i = 0;
@@ -156,20 +188,36 @@ int main(int argc, char* argv[])
 			// Did we get a video frame?
 			if (frameFinnished)
 			{
-				// Convert the image from its native format to RGB
-				sws_scale(sws_ctx, static_cast<uint8_t const* const*>(pFrame->data), pFrame->linesize, 0,
-					pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
+				SDL_UpdateYUVTexture(bmp, nullptr, pFrame->data[0], pFrame->linesize[0],
+					pFrame->data[1], pFrame->linesize[1], pFrame->data[2], pFrame->linesize[2]);
 
-				// Save the frame to disk
-				if (++i < 25)
-				{
-					SaveFrame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, i);
-				}
+				SDL_RenderCopy(renderer, bmp, nullptr, nullptr);
+				SDL_RenderPresent(renderer);
+				//// Convert the image from its native format to RGB
+				//sws_scale(sws_ctx, static_cast<uint8_t const* const*>(pFrame->data), pFrame->linesize, 0,
+				//	pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
+
+				//// Save the frame to disk
+				//if (++i < 25)
+				//{
+				//	SaveFrame(pFrameRGB, pCodecCtx->width, pCodecCtx->height, i);
+				//}
 			}
 		}
 
 		// Free the packet that was allocated by av_read_frame
 		av_packet_unref(&packet);
+
+		SDL_PollEvent(&event);
+		switch (event.type)
+		{
+		case SDL_QUIT:
+			SDL_Quit();
+			return 0;
+			break;
+		default:
+			break;
+		}
 	}
 
 	// Free the RGB image
