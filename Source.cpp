@@ -4,6 +4,7 @@ extern "C" {
 	#include <libswscale/swscale.h>
 	#include <libavutil/imgutils.h>
 	#include <libavutil/avstring.h>
+	#include <libavutil/time.h>
 }
 
 #pragma comment(lib, "avcodec.lib")
@@ -20,6 +21,9 @@ extern "C" {
 #define MAX_AUDIOQ_SIZE (5 * 16 * 1024)
 #define MAX_VIDEOQ_SIZE (5 * 256 * 1024)
 
+#define AV_SYNC_THRESHOLD 0.01
+#define AV_NOSYNC_THRESHOLD 10.0
+
 #define FF_REFRESH_EVENT (SDL_USEREVENT)
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
 
@@ -30,11 +34,14 @@ extern "C" {
 #include <stdio.h>
 #include <assert.h>
 
+//#define SURFACE
+
 struct VideoPicture
 {
 	SDL_Texture* bmp;
 	int width, height; // source height & width
 	int allocated;
+	double pts;
 };
 
 struct PacketQueue {
@@ -49,6 +56,8 @@ struct VideoState
 {
 	AVFormatContext* pFormatCtx;
 	int videoStream, audioStream;
+
+	double audio_clock;
 	AVStream* audio_st;
 	AVCodecContext* audio_ctx;
 	PacketQueue audioq;
@@ -63,6 +72,11 @@ struct VideoState
 	AVCodecContext* video_ctx;
 	PacketQueue videoq;
 	SwsContext* sws_ctx;
+
+	double frame_timer;
+	double frame_last_pts;
+	double frame_last_delay;
+	double video_clock; // pts of last decoded frame / predicted pts of next decoded frame
 
 	VideoPicture pictq[VIDEO_PICTURE_QUEUE_SIZE];
 	int pictq_size, pictq_rindex, pictq_windex;
@@ -189,10 +203,11 @@ int decode(AVCodecContext* avctx, AVFrame* frame, int* got_frame, AVPacket* pkt)
 	return ret;
 }
 
-int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size)
+int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size, double* pts_ptr)
 {
 	int len1, data_size = 0;
 	AVPacket* pkt = &is->audio_pkt;
+	double pts;
 
 	for (;;)
 	{
@@ -213,6 +228,7 @@ int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size)
 			{
 				if (av_sample_fmt_is_planar(is->audio_ctx->sample_fmt) == 1)
 				{
+#ifdef SURFACE
 					// Test video has 2 channels decoded to planar as floats
 					// SDL audio initiates with float32
 					// Reference: https://gist.github.com/targodan/8cef8f2b682a30055aa7937060cd94b7 for supporting more formats
@@ -224,6 +240,25 @@ int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size)
 						fBuf[2 * i + 1] = fData[1][i];
 					}
 					data_size = sizeof(float) * is->audio_frame.nb_samples * 2;
+#else
+					// Test video has 2 channels decoded to planar as floats
+					// Desktop output has 6 channels
+					// SDL audio initiates with int32
+					// Reference: https://gist.github.com/targodan/8cef8f2b682a30055aa7937060cd94b7 for supporting more formats
+					float** fData = reinterpret_cast<float**>(is->audio_frame.data);
+					float* fBuf = reinterpret_cast<float*>(audio_buf); // why not int?
+					for (int i = 0; i < is->audio_frame.nb_samples; ++i)
+					{
+						fBuf[6 * i] = fData[0][i];
+						fBuf[6 * i + 1] = fData[1][i];
+						fBuf[6 * i + 2] = 0;
+						fBuf[6 * i + 3] = 0;
+						fBuf[6 * i + 4] = 0;
+						fBuf[6 * i + 5] = 0;
+					}
+					data_size = sizeof(float) * is->audio_frame.nb_samples * 6;
+#endif // SURFACE
+
 				}
 				else
 				{
@@ -238,6 +273,12 @@ int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size)
 				// No data yet, get more frames
 				continue;
 			}
+
+			// Keep audio_clock up-to-date
+			pts = is->audio_clock;
+			*pts_ptr = pts;
+			is->audio_clock += is->audio_frame.nb_samples;
+
 			// We have data, return it and come back for more later
 			return data_size;
 		}
@@ -252,13 +293,33 @@ int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size)
 
 		is->audio_pkt_data = pkt->data;
 		is->audio_pkt_size = pkt->size;
+		// if update, update the audio clock w/pts
+		if (pkt->pts != AV_NOPTS_VALUE)
+			is->audio_clock = av_q2d(is->audio_st->time_base) * pkt->pts;
 	}
+}
+
+double get_audio_clock(VideoState* is)
+{
+	double pts;
+	int hw_buf_size, bytes_per_sec, n;
+
+	pts = is->audio_clock;
+	hw_buf_size = is->audio_buf_size - is->audio_buf_index;
+	bytes_per_sec = 0;
+	n = is->audio_st->codecpar->channels * 4; // float
+	if (is->audio_st)
+		bytes_per_sec = is->audio_st->codecpar->sample_rate * n;
+	if (bytes_per_sec)
+		pts -= (double)hw_buf_size / bytes_per_sec;
+	return pts;
 }
 
 void audio_callback(void* userdata, Uint8* stream, int len)
 {
 	VideoState* is = (VideoState*)userdata;
 	int len1, audio_size;
+	double pts;
 
 	static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
 	static unsigned int audio_buf_size = 0;
@@ -269,7 +330,7 @@ void audio_callback(void* userdata, Uint8* stream, int len)
 		if (audio_buf_index >= audio_buf_size)
 		{
 			// We have already sent all our data; get more
-			audio_size = audio_decode_frame(is, audio_buf, sizeof(audio_buf));
+			audio_size = audio_decode_frame(is, audio_buf, sizeof(audio_buf), &pts);
 
 			if (audio_size < 0)
 			{
@@ -334,7 +395,7 @@ void alloc_picture(void* userdata)
 	vp->allocated = 1;
 }
 
-int queue_picture(VideoState* is, AVFrame* pFrame)
+int queue_picture(VideoState* is, AVFrame* pFrame, double pts)
 {
 	VideoPicture* vp;
 
@@ -363,9 +424,10 @@ int queue_picture(VideoState* is, AVFrame* pFrame)
 	// We have a place to put our picture on the queue
 	if (vp->bmp)
 	{
+		vp->pts = pts;
 		SDL_UpdateYUVTexture(vp->bmp, nullptr, pFrame->data[0], pFrame->linesize[0],
 			pFrame->data[1], pFrame->linesize[1], pFrame->data[2], pFrame->linesize[2]);
-
+		
 		if (++is->pictq_windex == VIDEO_PICTURE_QUEUE_SIZE)
 			is->pictq_windex = 0;
 
@@ -377,6 +439,27 @@ int queue_picture(VideoState* is, AVFrame* pFrame)
 	return 0;
 }
 
+double synchronize_video(VideoState* is, AVFrame* src_frame, double pts)
+{
+	double frame_delay;
+
+	if (pts != 0)
+	{
+		is->video_clock = pts;
+	}
+	else
+	{
+		pts = is->video_clock;
+	}
+
+	// update video clock
+	frame_delay = av_q2d(is->video_st->time_base);
+	// if we are repeating frame, adjust clock accordingly
+	frame_delay += src_frame->repeat_pict * (frame_delay * 0.5);
+	is->video_clock += frame_delay;
+	return pts;
+}
+
 int video_thread(void* arg)
 {
 	VideoState* is = reinterpret_cast<VideoState*>(arg);
@@ -385,6 +468,7 @@ int video_thread(void* arg)
 	AVFrame* pFrame;
 
 	pFrame = av_frame_alloc();
+	double pts;
 
 	for (;;)
 	{
@@ -394,13 +478,27 @@ int video_thread(void* arg)
 			break;
 		}
 
+		pts = 0;
+
 		//Decode video frame
 		decode(is->video_ctx, pFrame, &frameFinished, packet);
+
+		if (packet->dts != AV_NOPTS_VALUE)
+		{
+			pts = pFrame->best_effort_timestamp;
+		}
+		else
+		{
+			pts = 0;
+		}
+
+		pts *= av_q2d(is->video_st->time_base);
 
 		// Did we get a video frame?
 		if (frameFinished)
 		{
-			if (queue_picture(is, pFrame) < 0)
+			pts = synchronize_video(is, pFrame, pts);
+			if (queue_picture(is, pFrame, pts) < 0)
 			{
 				break;
 			}
@@ -481,6 +579,9 @@ int stream_component_open(VideoState* is, int stream_index)
 		is->videoStream = stream_index;
 		is->video_st = pFormatCtx->streams[stream_index];
 		is->video_ctx = codecCtx;
+
+		is->frame_timer = (double)av_gettime() / 1000000.0;
+		is->frame_last_delay = 40e-3;
 
 		packet_queue_init(&is->videoq);
 		is->video_tid = SDL_CreateThread(video_thread, "video thread", is);
@@ -678,6 +779,7 @@ void video_refresh_timer(void* userdata)
 {
 	VideoState* is = reinterpret_cast<VideoState*>(userdata);
 	VideoPicture* vp;
+	double actual_delay, delay, sync_threshold, ref_clock, diff;
 
 	if (is->video_st)
 	{
@@ -686,9 +788,42 @@ void video_refresh_timer(void* userdata)
 		else
 		{
 			vp = &is->pictq[is->pictq_rindex];
-			/* Timing code goes here */
+			
+			delay = vp->pts - is->frame_last_pts;
+			if (delay <= 0 || delay >= 1)
+			{
+				// if incorrect delay, use previous one
+				delay = is->frame_last_delay;
+			}
 
-			schedule_refresh(is, 40);
+			// save for next time
+			is->frame_last_delay = delay;
+			is->frame_last_pts = vp->pts;
+
+			// update delay to sync to audio
+			ref_clock = get_audio_clock(is);
+			diff = vp->pts - ref_clock;
+
+			/* Skip or repeat the frame. Take delay into account
+				FFPlay still doesn't "know if this is the best guess." */
+			sync_threshold = (delay > AV_SYNC_THRESHOLD) ? delay : AV_SYNC_THRESHOLD;
+			if (fabs(diff) < AV_NOSYNC_THRESHOLD)
+			{
+				if (diff <= -sync_threshold)
+					delay = 0;
+				else if (diff >= sync_threshold)
+					delay = 2 * delay;
+			}
+			is->frame_timer += delay;
+
+			// compute REAL delay
+			actual_delay = is->frame_timer - (av_gettime() / 1000000.0);
+			if (actual_delay < 0.010)
+			{
+				// Really it should skip the picture instead
+				actual_delay = 0.010;
+			}
+			schedule_refresh(is, (int)(actual_delay * 1000 + 0.5));
 
 			/* show the picture! */
 			video_display(is);
