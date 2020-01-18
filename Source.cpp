@@ -24,6 +24,9 @@ extern "C" {
 #define AV_SYNC_THRESHOLD 0.01
 #define AV_NOSYNC_THRESHOLD 10.0
 
+#define SAMPLE_CORRECTION_PERCENT_MAX 10
+#define AUDIO_DIFF_AVG_NB 20
+
 #define FF_REFRESH_EVENT (SDL_USEREVENT)
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
 
@@ -35,6 +38,14 @@ extern "C" {
 #include <assert.h>
 
 //#define SURFACE
+
+enum {
+	AV_SYNC_AUDIO_MASTER,
+	AV_SYNC_VIDEO_MASTER,
+	AV_SYNC_EXTERNAL_MASTER
+};
+
+#define DEFAULT_AV_SYNC_TYPE AV_SYNC_EXTERNAL_MASTER
 
 struct VideoPicture
 {
@@ -57,6 +68,9 @@ struct VideoState
 	AVFormatContext* pFormatCtx;
 	int videoStream, audioStream;
 
+	int             av_sync_type;
+	double          external_clock_start; /* external clock base */
+
 	double audio_clock;
 	AVStream* audio_st;
 	AVCodecContext* audio_ctx;
@@ -68,6 +82,11 @@ struct VideoState
 	AVPacket audio_pkt;
 	uint8_t* audio_pkt_data;
 	int audio_pkt_size;
+	int audio_hw_buffer_size;
+	double audio_diff_cum;
+	double audio_diff_avg_coef;
+	double audio_diff_threshold;
+	double audio_diff_avg_count;
 	AVStream* video_st;
 	AVCodecContext* video_ctx;
 	PacketQueue videoq;
@@ -77,6 +96,9 @@ struct VideoState
 	double frame_last_pts;
 	double frame_last_delay;
 	double video_clock; // pts of last decoded frame / predicted pts of next decoded frame
+	double video_current_pts; // current displayed pts (different from video_clock if frame fifos are used)
+	int64_t video_current_pts_time; // time (av_gettime) at which we updated video_current_pts - used to have running video pts
+
 
 	VideoPicture pictq[VIDEO_PICTURE_QUEUE_SIZE];
 	int pictq_size, pictq_rindex, pictq_windex;
@@ -277,7 +299,7 @@ int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size, double*
 			// Keep audio_clock up-to-date
 			pts = is->audio_clock;
 			*pts_ptr = pts;
-			is->audio_clock += is->audio_frame.nb_samples;
+			is->audio_clock += is->audio_frame.nb_samples * (1.0 / is->audio_ctx->sample_rate);
 
 			// We have data, return it and come back for more later
 			return data_size;
@@ -315,43 +337,134 @@ double get_audio_clock(VideoState* is)
 	return pts;
 }
 
+double get_video_clock(VideoState* is)
+{
+	double delta;
+	
+	delta = (av_gettime() - is->video_current_pts_time) / 1000000.0;
+	return is->video_current_pts + delta;
+}
+
+double get_external_clock(VideoState* is)
+{
+	return (av_gettime() - is->external_clock_start) / 1000000.0;
+}
+
+double get_master_clock(VideoState* is)
+{
+	if (is->av_sync_type == AV_SYNC_VIDEO_MASTER)
+		return get_video_clock(is);
+	else if (is->av_sync_type == AV_SYNC_AUDIO_MASTER)
+		return get_video_clock(is);
+	else
+		return get_external_clock(is);
+}
+
+int synchronize_audio(VideoState* is, float* samples, int samples_size, double pts)
+{
+	int n;
+	double ref_clock;
+
+	int channels = is->audio_st->codecpar->channels;
+	n = 4 * channels; // int or float
+	samples_size /= n;
+
+	if (is->av_sync_type != AV_SYNC_AUDIO_MASTER)
+	{
+		double diff, avg_diff;
+		int wanted_size, min_size, max_size, nb_samples;
+
+		ref_clock = get_master_clock(is);
+		diff = get_audio_clock(is) - ref_clock;
+
+		if (fabs(diff) < AV_NOSYNC_THRESHOLD)
+		{
+			// accumulate the diffs
+			is->audio_diff_cum = diff + is->audio_diff_avg_coef * is->audio_diff_cum;
+			if (is->audio_diff_avg_count < AUDIO_DIFF_AVG_NB)
+			{
+				is->audio_diff_avg_count++;
+			}
+			else
+			{
+				avg_diff = is->audio_diff_cum * (1.0 - is->audio_diff_avg_coef);
+
+				// Shrinking/expanding buffer code
+				if (fabs(avg_diff) >= is->audio_diff_threshold)
+				{
+					wanted_size = samples_size + diff * is->audio_st->codecpar->sample_rate;
+					min_size = samples_size * ((100 - SAMPLE_CORRECTION_PERCENT_MAX) / 100);
+					max_size = samples_size * ((100 + SAMPLE_CORRECTION_PERCENT_MAX) / 100);
+
+					if (wanted_size < min_size)
+					{
+						wanted_size = min_size;
+					}
+					else if (wanted_size > max_size)
+					{
+						wanted_size = max_size;
+					}
+
+					if (wanted_size < samples_size)
+					{
+						// remove samples?
+						samples_size = wanted_size;
+					}
+					else if (wanted_size > samples_size)
+					{
+						for (; samples_size < wanted_size; ++samples_size)
+						{
+							memcpy(samples + samples_size * channels, samples + (samples_size - 1) * channels, n);
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			// difference is Too big; reset diff stuff
+			is->audio_diff_avg_count = 0;
+			is->audio_diff_cum = 0;
+		}
+	}
+
+	return samples_size * n;
+}
+
 void audio_callback(void* userdata, Uint8* stream, int len)
 {
 	VideoState* is = (VideoState*)userdata;
 	int len1, audio_size;
 	double pts;
 
-	static uint8_t audio_buf[(MAX_AUDIO_FRAME_SIZE * 3) / 2];
-	static unsigned int audio_buf_size = 0;
-	static unsigned int audio_buf_index = 0;
-
 	while (len > 0)
 	{
-		if (audio_buf_index >= audio_buf_size)
+		if (is->audio_buf_index >= is->audio_buf_size)
 		{
 			// We have already sent all our data; get more
-			audio_size = audio_decode_frame(is, audio_buf, sizeof(audio_buf), &pts);
+			audio_size = audio_decode_frame(is, is->audio_buf, sizeof(is->audio_buf), &pts);
 
 			if (audio_size < 0)
 			{
 				// If error, output silence
-				audio_buf_size = 1024;
-				memset(audio_buf, 0, audio_buf_size);
+				is->audio_buf_size = 1024;
+				memset(is->audio_buf, 0, is->audio_buf_size);
 			}
 			else
 			{
-				audio_buf_size = audio_size;
+				audio_size = synchronize_audio(is, (float*)is->audio_buf, audio_size, pts);
+				is->audio_buf_size = audio_size;
 			}
-			audio_buf_index = 0;
+			is->audio_buf_index = 0;
 		}
-		len1 = audio_buf_size - audio_buf_index;
+		len1 = is->audio_buf_size - is->audio_buf_index;
 		if (len1 > len)
 			len1 = len;
-		memcpy(stream, audio_buf + audio_buf_index, len1);
+		memcpy(stream, is->audio_buf + is->audio_buf_index, len1);
 
 		len -= len1;
 		stream += len1;
-		audio_buf_index += len1;
+		is->audio_buf_index += len1;
 	}
 }
 
@@ -582,6 +695,7 @@ int stream_component_open(VideoState* is, int stream_index)
 
 		is->frame_timer = (double)av_gettime() / 1000000.0;
 		is->frame_last_delay = 40e-3;
+		is->video_current_pts_time = av_gettime();
 
 		packet_queue_init(&is->videoq);
 		is->video_tid = SDL_CreateThread(video_thread, "video thread", is);
@@ -654,6 +768,8 @@ int decode_thread(void* arg)
 		fprintf(stderr, "%s: coud not open codecs\n", is->filename);
 		goto fail;
 	}
+
+	is->external_clock_start = av_gettime();
 
 	// main decode loop
 
@@ -788,6 +904,9 @@ void video_refresh_timer(void* userdata)
 		else
 		{
 			vp = &is->pictq[is->pictq_rindex];
+
+			is->video_current_pts = vp->pts;
+			is->video_current_pts_time = av_gettime();
 			
 			delay = vp->pts - is->frame_last_pts;
 			if (delay <= 0 || delay >= 1)
@@ -800,19 +919,23 @@ void video_refresh_timer(void* userdata)
 			is->frame_last_delay = delay;
 			is->frame_last_pts = vp->pts;
 
-			// update delay to sync to audio
-			ref_clock = get_audio_clock(is);
-			diff = vp->pts - ref_clock;
-
-			/* Skip or repeat the frame. Take delay into account
-				FFPlay still doesn't "know if this is the best guess." */
-			sync_threshold = (delay > AV_SYNC_THRESHOLD) ? delay : AV_SYNC_THRESHOLD;
-			if (fabs(diff) < AV_NOSYNC_THRESHOLD)
+			// Update delay to sync to audio if not master source
+			if (is->av_sync_type != AV_SYNC_VIDEO_MASTER)
 			{
-				if (diff <= -sync_threshold)
-					delay = 0;
-				else if (diff >= sync_threshold)
-					delay = 2 * delay;
+				// update delay to sync to audio
+				ref_clock = get_audio_clock(is);
+				diff = vp->pts - ref_clock;
+
+				/* Skip or repeat the frame. Take delay into account
+					FFPlay still doesn't "know if this is the best guess." */
+				sync_threshold = (delay > AV_SYNC_THRESHOLD) ? delay : AV_SYNC_THRESHOLD;
+				if (fabs(diff) < AV_NOSYNC_THRESHOLD)
+				{
+					if (diff <= -sync_threshold)
+						delay = 0;
+					else if (diff >= sync_threshold)
+						delay = 2 * delay;
+				}
 			}
 			is->frame_timer += delay;
 
@@ -866,6 +989,7 @@ int main(int argc, char* argv[])
 
 	is->pictq_mutex = SDL_CreateMutex();
 	is->pictq_cond = SDL_CreateCond();
+	is->av_sync_type = DEFAULT_AV_SYNC_TYPE;
 
 	window = SDL_CreateWindow("YouTubeTV", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1024, 576, SDL_WINDOW_SHOWN);
 	if (!window)
