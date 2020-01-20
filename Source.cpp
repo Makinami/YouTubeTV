@@ -37,7 +37,7 @@ extern "C" {
 #include <stdio.h>
 #include <assert.h>
 
-//#define SURFACE
+#define SURFACE
 
 enum {
 	AV_SYNC_AUDIO_MASTER,
@@ -70,6 +70,10 @@ struct VideoState
 
 	int             av_sync_type;
 	double          external_clock_start; /* external clock base */
+
+	int seek_req;
+	int seek_flags;
+	int64_t seek_pos;
 
 	double audio_clock;
 	AVStream* audio_st;
@@ -127,9 +131,11 @@ void packet_queue_init(PacketQueue* q)
 	q->cond = SDL_CreateCond();
 }
 
+AVPacket flush_pkt;
+
 int packet_queue_put(PacketQueue* q, AVPacket* pkt)
 {
-	if (av_packet_make_writable(pkt) < 0)
+	if (pkt != &flush_pkt && av_packet_make_refcounted(pkt) < 0)
 	{
 		return -1;
 	}
@@ -196,6 +202,25 @@ static int packet_queue_get(PacketQueue* q, AVPacket* pkt, int block)
 	}
 	SDL_UnlockMutex(q->mutex);
 	return ret;
+}
+
+static void packet_queue_flush(PacketQueue* q)
+{
+	AVPacketList* pkt, * pkt1;
+
+	SDL_LockMutex(q->mutex);
+	for (pkt = q->first_pkt; pkt != nullptr; pkt = pkt1)
+	{
+		pkt1 = pkt->next;
+		av_packet_unref(&pkt->pkt);
+		av_freep(&pkt);
+	}
+
+	q->last_pkt = nullptr;
+	q->first_pkt = nullptr;
+	q->nb_packets = 0;
+	q->size = 0;
+	SDL_UnlockMutex(q->mutex);
 }
 
 PacketQueue audioq;
@@ -312,6 +337,12 @@ int audio_decode_frame(VideoState* is, uint8_t* audio_buf, int buf_size, double*
 
 		if (packet_queue_get(&is->audioq, pkt, 1) < 0)
 			return -1;
+
+		if (pkt->data == flush_pkt.data)
+		{
+			avcodec_flush_buffers(is->audio_ctx);
+			continue;
+		}
 
 		is->audio_pkt_data = pkt->data;
 		is->audio_pkt_size = pkt->size;
@@ -591,6 +622,11 @@ int video_thread(void* arg)
 			break;
 		}
 
+		if (packet->data == flush_pkt.data) {
+			avcodec_flush_buffers(is->video_ctx);
+			continue;
+		}
+
 		pts = 0;
 
 		//Decode video frame
@@ -778,7 +814,39 @@ int decode_thread(void* arg)
 		if (is->quit)
 			break;
 
-		// seed stuf goes here
+		// seek stuf goes here
+		if (is->seek_req)
+		{
+			int stream_index = -1;
+			int64_t seek_target = is->seek_pos;
+
+			if (is->videoStream >= 0) stream_index = is->videoStream;
+			else if (is->videoStream >= 0) stream_index = is->audioStream;
+
+			if (stream_index >= 0)
+			{
+				seek_target = av_rescale_q(seek_target, AVRational{ 1, AV_TIME_BASE }, pFormatCtx->streams[stream_index]->time_base);
+			}
+			if (av_seek_frame(is->pFormatCtx, stream_index, seek_target, is->seek_flags) < 0)
+			{
+				fprintf(stderr, "%s: error while seeking\n", is->pFormatCtx->url);
+			}
+			else
+			{
+				if (is->audioStream >= 0)
+				{
+					packet_queue_flush(&is->audioq);
+					packet_queue_put(&is->audioq, &flush_pkt);
+				}
+				if (is->videoStream >= 0)
+				{
+					packet_queue_flush(&is->videoq);
+					packet_queue_put(&is->videoq, &flush_pkt);
+				}
+			}
+			is->seek_req = 0;
+		}
+
 		if (is->audioq.size > MAX_AUDIOQ_SIZE || is->videoq.size > MAX_VIDEOQ_SIZE)
 		{
 			SDL_Delay(10);
@@ -967,6 +1035,16 @@ void video_refresh_timer(void* userdata)
 	}
 }
 
+void stream_seek(VideoState* is, int64_t pos, int rel)
+{
+	if (!is->seek_req)
+	{
+		is->seek_pos = pos;
+		is->seek_flags = rel < 0 ? AVSEEK_FLAG_BACKWARD : 0;
+		is->seek_req = 1;
+	}
+}
+
 int main(int argc, char* argv[])
 {
 	if (argc < 2) {
@@ -1018,16 +1096,49 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+	av_init_packet(&flush_pkt);
+	flush_pkt.data = (uint8_t*)("FLUSH");
+
 	while (true)
 	{
+		double incr, pos;
+
 		SDL_WaitEvent(&event);
 		switch (event.type)
 		{
+		case SDL_KEYDOWN:
+			switch (event.key.keysym.sym)
+			{
+			case SDLK_LEFT:
+				incr = -10;
+				goto do_seek;
+			case SDLK_RIGHT:
+				incr = 10;
+				goto do_seek;
+			do_seek:
+				if (global_video_state)
+				{
+					pos = get_master_clock(global_video_state);
+					pos += incr;
+					stream_seek(global_video_state, (int64_t)(pos * AV_TIME_BASE), incr);
+				}
+				break;
+			default:
+				break;
+			}
+			break;
 		case FF_REFRESH_EVENT:
 			video_refresh_timer(event.user.data1);
 			break;
 		case SDL_QUIT:
 			quit = 1;
+			/*
+	   * If the video has finished playing, then both the picture and
+	   * audio queues are waiting for more data.  Make them stop
+	   * waiting and terminate normally.
+	   */
+			SDL_CondSignal(is->audioq.cond);
+			SDL_CondSignal(is->videoq.cond);
 			SDL_Quit();
 			return 0;
 			break;
