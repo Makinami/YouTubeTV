@@ -145,11 +145,31 @@ class Clock
 public:
 	auto time() const
 	{
-		return std::chrono::steady_clock::now() - start;
+		if (paused)
+		{
+			return (last_paused - start) - paused_time;
+		}
+		else
+		{
+			return (std::chrono::steady_clock::now() - start) - paused_time;
+		}
 	}
-	//virtual double pause() = 0;
+	void pause()
+	{
+		last_paused = std::chrono::steady_clock::now();
+		paused = true;
+	}
+	void unpause()
+	{
+		paused_time += (std::chrono::steady_clock::now() - last_paused);
+		paused = false;
+	}
 private:
 	std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+	std::chrono::duration<double> paused_time{ 0 };
+	std::chrono::steady_clock::time_point last_paused;
+
+	bool paused = false;
 };
 
 class VideoStream
@@ -159,6 +179,8 @@ public:
 	~VideoStream() { stop(); };
 	void start();
 	void stop();
+	void pause();
+	void unpause();
 
 	auto get_frame()
 	{
@@ -214,6 +236,8 @@ public:
 	};
 	void start();
 	void stop();
+	void pause();
+	void unpause();
 
 	friend void sdl_callback(void* ptr, Uint8* stream, int len);
 
@@ -247,6 +271,10 @@ private:
 	const double average_difference_coef = std::exp(std::log(0.01) / AUDIO_DIFF_AVG_NB); // extract 
 	int average_differance_count = 0;
 	double difference_threshold;
+
+	bool paused = false;
+	std::mutex continue_mtx;
+	std::condition_variable continue_cv;
 };
 
 void sdl_callback(void* ptr, Uint8* stream, int len);
@@ -306,6 +334,8 @@ int main(int argc, char* argv[])
 	vs.start();
 	as.start();
 
+	bool paused = false;
+
 	SDL_Event event;
 	while (true)
 	{
@@ -322,6 +352,26 @@ int main(int argc, char* argv[])
 		SDL_PollEvent(&event);
 		switch (event.type)
 		{
+		case SDL_KEYDOWN:
+			switch (event.key.keysym.sym) {
+			case SDLK_SPACE:
+				if (paused)
+				{
+					clock.unpause();
+					vs.unpause();
+					as.unpause();
+					paused = false;
+				}
+				else
+				{
+					clock.pause();
+					vs.pause();
+					as.pause();
+					paused = true;
+				}
+				break;
+			}
+			break;
 		case SDL_QUIT:
 			SDL_Quit();
 			return 0;
@@ -385,6 +435,17 @@ void VideoStream::stop()
 	}
 }
 
+void VideoStream::pause()
+{
+	paused = true;
+}
+
+void VideoStream::unpause()
+{
+	paused = false;
+	continue_cv.notify_one();
+}
+
 void VideoStream::decode_frame()
 {
 	AVPacket packet;
@@ -427,6 +488,12 @@ void sdl_callback(void* ptr, Uint8* stream, int len)
 
 	while (len > 0)
 	{
+		if (as->paused)
+		{
+			memset(stream, 0, len);
+			return;
+		}
+
 		if (as->buffer_index >= as->buffer_size)
 		{
 			if (!as->decode_frame())
@@ -490,6 +557,16 @@ void AudioStream::start()
 void AudioStream::stop()
 {
 	SDL_PauseAudioDevice(device_id, 1);
+}
+
+void AudioStream::pause()
+{
+	paused = true;
+}
+
+void AudioStream::unpause()
+{
+	paused = false;
 }
 
 int AudioStream::decode_frame()
