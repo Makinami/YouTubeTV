@@ -164,7 +164,7 @@ public:
 		time_adjustment += (std::chrono::steady_clock::now() - last_paused);
 		paused = false;
 	}
-	void seek(std::chrono::duration<double> new_time)
+	void seek(std::chrono::duration<double> new_time)	
 	{
 		time_adjustment -= (new_time - time());
 	}
@@ -309,6 +309,8 @@ int decode(AVCodecContext* avctx, AVFrame* frame, int* got_frame, AVPacket* pkt)
 		if (ret < 0)
 			return ret == AVERROR_EOF ? 0 : ret;
 	}
+
+	av_packet_unref(pkt);
 
 	ret = avcodec_receive_frame(avctx, frame);
 	if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
