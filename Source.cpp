@@ -147,11 +147,11 @@ public:
 	{
 		if (paused)
 		{
-			return (last_paused - start) - paused_time;
+			return (last_paused - start) - time_adjustment;
 		}
 		else
 		{
-			return (std::chrono::steady_clock::now() - start) - paused_time;
+			return (std::chrono::steady_clock::now() - start) - time_adjustment;
 		}
 	}
 	void pause()
@@ -161,12 +161,17 @@ public:
 	}
 	void unpause()
 	{
-		paused_time += (std::chrono::steady_clock::now() - last_paused);
+		time_adjustment += (std::chrono::steady_clock::now() - last_paused);
 		paused = false;
 	}
+	void seek(std::chrono::duration<double> new_time)
+	{
+		time_adjustment -= (new_time - time());
+	}
+
 private:
 	std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-	std::chrono::duration<double> paused_time{ 0 };
+	std::chrono::duration<double> time_adjustment{ 0 };
 	std::chrono::steady_clock::time_point last_paused;
 
 	bool paused = false;
@@ -187,6 +192,8 @@ public:
 		std::unique_lock<std::mutex> lc{ frame_mtx };
 		return std::tuple<std::unique_lock<std::mutex>, SDL_Texture*>(std::move(lc), current_frame.get());
 	}
+
+	void seek(std::chrono::duration<double> _new_time);
 
 private:
 	void decode_frame();
@@ -212,6 +219,9 @@ private:
 	std::jthread decode_thread;
 	std::mutex continue_mtx;
 	std::condition_variable continue_cv;
+
+	bool seek_requested = false;
+	std::chrono::duration<double> new_time;
 };
 
 class AudioStream
@@ -238,6 +248,8 @@ public:
 	void stop();
 	void pause();
 	void unpause();
+
+	void seek(std::chrono::duration<double> _new_time);
 
 	friend void sdl_callback(void* ptr, Uint8* stream, int len);
 
@@ -275,6 +287,9 @@ private:
 	bool paused = false;
 	std::mutex continue_mtx;
 	std::condition_variable continue_cv;
+
+	bool seek_requested = false;
+	std::chrono::duration<double> new_time;
 };
 
 void sdl_callback(void* ptr, Uint8* stream, int len);
@@ -347,9 +362,9 @@ int main(int argc, char* argv[])
 			flc.unlock();
 
 			SDL_RenderPresent(renderer_ptr);
-		}
+		} 
 
-		SDL_PollEvent(&event);
+		if (SDL_PollEvent(&event) == 0) continue;
 		switch (event.type)
 		{
 		case SDL_KEYDOWN:
@@ -370,6 +385,18 @@ int main(int argc, char* argv[])
 					paused = true;
 				}
 				break;
+			case SDLK_RIGHT:
+			{auto new_time = clock.time() + std::chrono::duration<double>{5};
+			vs.seek(new_time);
+			as.seek(new_time);
+			clock.seek(new_time);
+			break; }
+			case SDLK_LEFT:
+			{auto new_time = clock.time() - std::chrono::duration<double>{5};
+			vs.seek(new_time);
+			as.seek(new_time);
+			clock.seek(new_time);
+			break; }
 			}
 			break;
 		case SDL_QUIT:
@@ -412,6 +439,18 @@ void VideoStream::start()
 		decode_thread = std::jthread([=](std::stop_token st) {
 			while (!st.stop_requested())
 			{
+				if (seek_requested)
+				{
+					auto new_dts = new_time.count() / timebase;
+					auto flags = AVSEEK_FLAG_ANY;
+					if (new_dts < working_frame->pts)
+						flags |= AVSEEK_FLAG_BACKWARD;
+					avformat_seek_file(format_ctx.get(), stream_index, INT64_MIN, new_dts, INT64_MAX, flags);
+					avcodec_flush_buffers(codec_ctx.get());
+					seek_requested = false;
+
+				}
+
 				if (paused)
 				{
 					std::unique_lock<std::mutex> lc{ continue_mtx };
@@ -446,6 +485,12 @@ void VideoStream::unpause()
 	continue_cv.notify_one();
 }
 
+void VideoStream::seek(std::chrono::duration<double> _new_time)
+{
+	new_time = _new_time;
+	seek_requested = true;
+}
+
 void VideoStream::decode_frame()
 {
 	AVPacket packet;
@@ -470,8 +515,8 @@ void VideoStream::decode_frame()
 
 			std::chrono::duration<double> frame_timestamp{ working_frame->pts * timebase };
 			auto current_time = clock.time();
-
-			if (frame_timestamp > current_time)
+			auto diff = (frame_timestamp - current_time).count();
+			if (frame_timestamp > current_time && !seek_requested)
 			{
 				std::this_thread::sleep_for(frame_timestamp - current_time);
 			}
@@ -488,6 +533,18 @@ void sdl_callback(void* ptr, Uint8* stream, int len)
 
 	while (len > 0)
 	{
+		if (as->seek_requested)
+		{
+			auto new_dts = as->new_time.count() / as->timebase;
+			auto flags = AVSEEK_FLAG_ANY;
+			if (new_dts < as->working_frame->pts)
+				flags |= AVSEEK_FLAG_BACKWARD;
+			avformat_seek_file(as->format_ctx.get(), as->stream_index, INT64_MIN, new_dts, INT64_MAX, flags);
+			avcodec_flush_buffers(as->codec_ctx.get());
+			as->seek_requested = false;
+
+		}
+
 		if (as->paused)
 		{
 			memset(stream, 0, len);
@@ -567,6 +624,12 @@ void AudioStream::pause()
 void AudioStream::unpause()
 {
 	paused = false;
+}
+
+void AudioStream::seek(std::chrono::duration<double> _new_time)
+{
+	new_time = _new_time;
+	seek_requested = true;
 }
 
 int AudioStream::decode_frame()
