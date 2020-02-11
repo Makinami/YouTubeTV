@@ -27,6 +27,15 @@ extern "C" {
 #include <thread>
 #include <chrono>
 #include <array>
+#include <algorithm>
+
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#endif // _WIN32
+
+#include <nlohmann/json.hpp>
+
 
 #define AV_SYNC_THRESHOLD 0.01
 #define AV_NOSYNC_THRESHOLD 10.0
@@ -164,7 +173,7 @@ public:
 		time_adjustment += (std::chrono::steady_clock::now() - last_paused);
 		paused = false;
 	}
-	void seek(std::chrono::duration<double> new_time)	
+	void seek(std::chrono::duration<double> new_time)
 	{
 		time_adjustment -= (new_time - time());
 	}
@@ -321,6 +330,146 @@ int decode(AVCodecContext* avctx, AVFrame* frame, int* got_frame, AVPacket* pkt)
 	return 0;
 }
 
+// From: https://stackoverflow.com/a/46348112
+int SystemCapture(
+	std::string         CmdLine,    //Command Line
+	std::wstring         CmdRunDir,  //set to '.' for current directory
+	std::string& ListStdOut, //Return List of StdOut
+	std::string& ListStdErr, //Return List of StdErr
+	uint32_t& RetCode)    //Return Exit Code
+{
+	int                  Success;
+	SECURITY_ATTRIBUTES  security_attributes;
+	HANDLE               stdout_rd = INVALID_HANDLE_VALUE;
+	HANDLE               stdout_wr = INVALID_HANDLE_VALUE;
+	HANDLE               stderr_rd = INVALID_HANDLE_VALUE;
+	HANDLE               stderr_wr = INVALID_HANDLE_VALUE;
+	PROCESS_INFORMATION  process_info;
+	STARTUPINFO          startup_info;
+	std::thread               stdout_thread;
+	std::thread               stderr_thread;
+
+	security_attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+	security_attributes.bInheritHandle = TRUE;
+	security_attributes.lpSecurityDescriptor = nullptr;
+
+	if (!CreatePipe(&stdout_rd, &stdout_wr, &security_attributes, 0) ||
+		!SetHandleInformation(stdout_rd, HANDLE_FLAG_INHERIT, 0)) {
+		return -1;
+	}
+
+	if (!CreatePipe(&stderr_rd, &stderr_wr, &security_attributes, 0) ||
+		!SetHandleInformation(stderr_rd, HANDLE_FLAG_INHERIT, 0)) {
+		if (stdout_rd != INVALID_HANDLE_VALUE) CloseHandle(stdout_rd);
+		if (stdout_wr != INVALID_HANDLE_VALUE) CloseHandle(stdout_wr);
+		return -2;
+	}
+
+	ZeroMemory(&process_info, sizeof(PROCESS_INFORMATION));
+	ZeroMemory(&startup_info, sizeof(STARTUPINFO));
+
+	startup_info.cb = sizeof(STARTUPINFO);
+	startup_info.hStdInput = 0;
+	startup_info.hStdOutput = stdout_wr;
+	startup_info.hStdError = stderr_wr;
+
+	if (stdout_rd || stderr_rd)
+		startup_info.dwFlags |= STARTF_USESTDHANDLES;
+
+	// Make a copy because CreateProcess needs to modify string buffer
+	std::wstring CmdLineW(CmdLine.begin(), CmdLine.end());
+	wchar_t      CmdLineStr[MAX_PATH];
+	wcsncpy_s(CmdLineStr, MAX_PATH, CmdLineW.c_str(), CmdLineW.size());
+	CmdLineStr[MAX_PATH - 1] = 0;
+
+	Success = CreateProcess(
+		nullptr,
+		CmdLineStr,
+		nullptr,
+		nullptr,
+		TRUE,
+		0,
+		nullptr,
+		CmdRunDir.c_str(),
+		&startup_info,
+		&process_info
+	);
+	CloseHandle(stdout_wr);
+	CloseHandle(stderr_wr);
+
+	if (!Success) {
+		CloseHandle(process_info.hProcess);
+		CloseHandle(process_info.hThread);
+		CloseHandle(stdout_rd);
+		CloseHandle(stderr_rd);
+		return -4;
+	}
+	else {
+		CloseHandle(process_info.hThread);
+	}
+
+	if (stdout_rd) {
+		stdout_thread = std::thread([&]() {
+			DWORD  n;
+			const size_t bufsize = 1000;
+			char         buffer[bufsize];
+			for (;;) {
+				n = 0;
+				int Success = ReadFile(
+					stdout_rd,
+					buffer,
+					(DWORD)bufsize,
+					&n,
+					nullptr
+				);
+				if (!Success || n == 0)
+					break;
+				std::string s(buffer, n);
+				ListStdOut += s;
+			}
+		});
+	}
+
+	if (stderr_rd) {
+		stderr_thread = std::thread([&]() {
+			DWORD        n;
+			const size_t bufsize = 1000;
+			char         buffer[bufsize];
+			for (;;) {
+				n = 0;
+				int Success = ReadFile(
+					stderr_rd,
+					buffer,
+					(DWORD)bufsize,
+					&n,
+					nullptr
+				);
+				if (!Success || n == 0)
+					break;
+				std::string s(buffer, n);
+				ListStdOut += s;
+			}
+		});
+	}
+
+	WaitForSingleObject(process_info.hProcess, INFINITE);
+	if (!GetExitCodeProcess(process_info.hProcess, (DWORD*)&RetCode))
+		RetCode = -1;
+
+	CloseHandle(process_info.hProcess);
+
+	if (stdout_thread.joinable())
+		stdout_thread.join();
+
+	if (stderr_thread.joinable())
+		stderr_thread.join();
+
+	CloseHandle(stdout_rd);
+	CloseHandle(stderr_rd);
+
+	return 0;
+}
+
 int main(int argc, char* argv[])
 {
 	if (argc < 2) {
@@ -341,14 +490,54 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+	std::string out;
+	std::string err;
+	uint32_t code;
+	std::string cmd = "youtube-dl.exe -J https://www.youtube.com/watch?v=4QXCPuwBz2E";
+
+	SystemCapture(cmd, L".", out, err, code);
+
+	auto media_details = nlohmann::json::parse(out);
+
+	std::vector<nlohmann::json> video_streams, audio_streams;
+	std::copy_if(media_details["formats"].begin(), media_details["formats"].end(), std::back_inserter(video_streams), [](const nlohmann::json& stream) {
+		return stream["vcodec"].get<std::string>() != "none";
+	});
+	std::copy_if(media_details["formats"].begin(), media_details["formats"].end(), std::back_inserter(audio_streams), [](const nlohmann::json& stream) {
+		return stream["acodec"].get<std::string>() != "none";
+	});
+
+	std::sort(video_streams.begin(), video_streams.end(), [](const nlohmann::json& lhs, const nlohmann::json& rhs) {
+		return std::stoi(lhs["format_id"].get<std::string>()) > std::stoi(rhs["format_id"].get<std::string>());
+	});
+	std::sort(audio_streams.begin(), audio_streams.end(), [](const nlohmann::json& lhs, const nlohmann::json& rhs) {
+		return std::stoi(lhs["format_id"].get<std::string>()) > std::stoi(rhs["format_id"].get<std::string>());
+	});
+
 	GuardedRenderer renderer(window.get());
 
 	Clock clock;
 
-	VideoStream vs("video.mp4", renderer, clock);
-	AudioStream as("audio.webm", clock);
+	std::unique_ptr<VideoStream> vs = nullptr;
 
-	vs.start();
+	for (const auto& stream : video_streams)
+	{
+		try {
+			vs = std::make_unique<VideoStream>(stream["url"].get<std::string>(), renderer, clock);
+			break;
+		}
+		catch (...) {}
+	}
+
+	if (!vs)
+	{
+		std::cerr << "No supported video stream found";
+		return -1;
+	}
+
+	AudioStream as((*audio_streams.begin())["url"].get<std::string>(), clock);
+
+	vs->start();
 	as.start();
 
 	bool paused = false;
@@ -358,55 +547,59 @@ int main(int argc, char* argv[])
 	{
 		{
 			// won't deadlock 'cause this is the only thread that needs both at the same time
-			auto [flc, frame_ptr] = vs.get_frame();
+			auto [flc, frame_ptr] = vs->get_frame();
 			auto [rlc, renderer_ptr] = renderer.get_renderer();
 			SDL_RenderCopy(renderer_ptr, frame_ptr, nullptr, nullptr);
 			flc.unlock();
 
 			SDL_RenderPresent(renderer_ptr);
-		} 
+		}
 
 		if (SDL_PollEvent(&event) == 0) continue;
 		switch (event.type)
 		{
-		case SDL_KEYDOWN:
-			switch (event.key.keysym.sym) {
-			case SDLK_SPACE:
-				if (paused)
-				{
-					clock.unpause();
-					vs.unpause();
-					as.unpause();
-					paused = false;
-				}
-				else
-				{
-					clock.pause();
-					vs.pause();
-					as.pause();
-					paused = true;
+			case SDL_KEYDOWN:
+				switch (event.key.keysym.sym) {
+					case SDLK_SPACE:
+						if (paused)
+						{
+							clock.unpause();
+							vs->unpause();
+							as.unpause();
+							paused = false;
+						}
+						else
+						{
+							clock.pause();
+							vs->pause();
+							as.pause();
+							paused = true;
+						}
+						break;
+					case SDLK_RIGHT:
+					{
+						auto new_time = clock.time() + std::chrono::duration<double>{5};
+						vs->seek(new_time);
+						as.seek(new_time);
+						clock.seek(new_time);
+						break;
+					}
+					case SDLK_LEFT:
+					{
+						auto new_time = clock.time() - std::chrono::duration<double>{5};
+						vs->seek(new_time);
+						as.seek(new_time);
+						clock.seek(new_time);
+						break;
+					}
 				}
 				break;
-			case SDLK_RIGHT:
-			{auto new_time = clock.time() + std::chrono::duration<double>{5};
-			vs.seek(new_time);
-			as.seek(new_time);
-			clock.seek(new_time);
-			break; }
-			case SDLK_LEFT:
-			{auto new_time = clock.time() - std::chrono::duration<double>{5};
-			vs.seek(new_time);
-			as.seek(new_time);
-			clock.seek(new_time);
-			break; }
-			}
-			break;
-		case SDL_QUIT:
-			SDL_Quit();
-			return 0;
-			break;
-		default:
-			break;
+			case SDL_QUIT:
+				SDL_Quit();
+				return 0;
+				break;
+			default:
+				break;
 		}
 	}
 
@@ -424,6 +617,8 @@ VideoStream::VideoStream(const std::string& _url, GuardedRenderer& _renderer, co
 	timebase = av_q2d(format_ctx->streams[stream_index]->time_base);
 
 	auto codec = avcodec_find_decoder(codec_ctx->codec_id);
+	if (!codec)
+		throw std::runtime_error("Unsupported codec: "s + avcodec_get_name(codec_ctx->codec_id));
 
 	avcodec_open2(codec_ctx.get(), codec, nullptr);
 
@@ -602,7 +797,7 @@ AudioStream::AudioStream(const std::string& _url, const Clock& _clock)
 	audio_tgt.channels = spec.channels;
 	audio_tgt.frame_size = av_samples_get_buffer_size(nullptr, spec.channels, 1, audio_tgt.fmt, 1);
 	audio_tgt.bytes_per_sec = av_samples_get_buffer_size(nullptr, spec.channels, audio_tgt.freq, audio_tgt.fmt, 1);
-	
+
 	audio_src = audio_tgt;
 
 	difference_threshold = static_cast<double>(spec.size) / audio_tgt.bytes_per_sec;
