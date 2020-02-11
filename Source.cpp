@@ -639,7 +639,7 @@ void VideoStream::start()
 				if (seek_requested)
 				{
 					auto new_dts = new_time.count() / timebase;
-					auto flags = AVSEEK_FLAG_ANY;
+					auto flags = 0;
 					if (new_dts < working_frame->pts)
 						flags |= AVSEEK_FLAG_BACKWARD;
 					avformat_seek_file(format_ctx.get(), stream_index, INT64_MIN, new_dts, INT64_MAX, flags);
@@ -733,7 +733,7 @@ void sdl_callback(void* ptr, Uint8* stream, int len)
 		if (as->seek_requested)
 		{
 			auto new_dts = as->new_time.count() / as->timebase;
-			auto flags = AVSEEK_FLAG_ANY;
+			auto flags = 0;
 			if (new_dts < as->working_frame->pts)
 				flags |= AVSEEK_FLAG_BACKWARD;
 			avformat_seek_file(as->format_ctx.get(), as->stream_index, INT64_MIN, new_dts, INT64_MAX, flags);
