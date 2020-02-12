@@ -76,7 +76,39 @@ private:
 	bool paused = true;
 };
 
-class VideoStream
+template<AVMediaType MEDIA_TYPE>
+class MediaStream
+{
+public:
+	MediaStream(const std::string& _url, const Clock& _clock);
+
+	virtual void start() = 0;
+	virtual void stop() = 0;
+	virtual void pause() = 0;
+	virtual void unpause() = 0;
+
+	void seek(std::chrono::duration<double> _new_time)
+	{
+		new_time = _new_time;
+		seek_requested = true;
+	};
+
+protected:
+	const std::string url;
+	std::unique_ptr<AVFormatContext> format_ctx;
+	std::unique_ptr<AVCodecContext> codec_ctx;
+	std::unique_ptr<AVFrame> working_frame;
+
+	int stream_index;
+	double timebase;
+
+	const Clock& clock;
+
+	bool seek_requested = false;
+	std::chrono::duration<double> new_time;
+};
+
+class VideoStream : public MediaStream<AVMEDIA_TYPE_VIDEO>
 {
 public:
 	VideoStream(const std::string& _url, GuardedRenderer& _renderer, const Clock& _clock);
@@ -92,8 +124,6 @@ public:
 		return std::tuple<std::unique_lock<std::mutex>, SDL_Texture*>(std::move(lc), current_frame.get());
 	}
 
-	void seek(std::chrono::duration<double> _new_time);
-
 	std::tuple<int, int, AVRational> get_size()
 	{
 		return { codec_ctx->width, codec_ctx->height, codec_ctx->sample_aspect_ratio };
@@ -103,32 +133,19 @@ private:
 	void decode_frame();
 
 private:
-	std::string url;
-	std::unique_ptr<AVFormatContext> format_ctx;
-	std::unique_ptr<AVCodecContext> codec_ctx;
-
-	std::unique_ptr<AVFrame> working_frame;
 	std::unique_ptr<SDL_Texture> back_buffer;
 	std::unique_ptr<SDL_Texture> current_frame;
 	std::mutex frame_mtx;
 
-	int stream_index;
-	double timebase;
-
 	GuardedRenderer& renderer;
-
-	const Clock& clock;
 
 	bool paused = false;
 	std::jthread decode_thread;
 	std::mutex continue_mtx;
 	std::condition_variable continue_cv;
-
-	bool seek_requested = false;
-	std::chrono::duration<double> new_time;
 };
 
-class AudioStream
+class AudioStream : public MediaStream<AVMEDIA_TYPE_AUDIO>
 {
 	static constexpr int SDL_AUDIO_BUFFER_SIZE = 1024;
 	static constexpr int MAX_AUDIO_FRAME_SIZE = 192000;
@@ -156,8 +173,6 @@ public:
 	void pause();
 	void unpause();
 
-	void seek(std::chrono::duration<double> _new_time);
-
 	friend void sdl_callback(void* ptr, Uint8* stream, int len);
 
 private:
@@ -165,22 +180,11 @@ private:
 	int synchronize(int nb_samples);
 
 private:
-	std::string url;
-	std::unique_ptr<AVFormatContext> format_ctx;
-	std::unique_ptr<AVCodecContext> codec_ctx;
-
-	std::unique_ptr<AVFrame> working_frame;
-
-	int stream_index;
-	double timebase;
-
 	std::array<uint8_t, MAX_AUDIO_FRAME_SIZE> audio_buffer;
 	int buffer_size = 0;
 	int buffer_index = 0;
 
 	int device_id;
-
-	const Clock& clock;
 
 	struct AudioParams audio_src;
 	struct AudioParams audio_tgt;
@@ -194,9 +198,6 @@ private:
 	bool paused = false;
 	std::mutex continue_mtx;
 	std::condition_variable continue_cv;
-
-	bool seek_requested = false;
-	std::chrono::duration<double> new_time;
 };
 
 class YouTubeVideo
@@ -232,3 +233,48 @@ private:
 
 	bool paused = true;
 };
+
+inline std::unique_ptr<AVFormatContext> avformat_open_input(std::string_view filename)
+{
+	AVFormatContext* ic = nullptr;
+
+	if (avformat_open_input(&ic, filename.data(), nullptr, nullptr) < 0)
+		throw std::runtime_error("Could not open format input");
+
+	if (avformat_find_stream_info(ic, nullptr) < 0)
+		throw std::runtime_error("Could not read stream info");
+
+	return std::unique_ptr<AVFormatContext>(ic);
+}
+
+inline std::unique_ptr<AVCodecContext> make_codec_context(const AVCodecParameters* const codecpar)
+{
+	auto ctx = std::unique_ptr<AVCodecContext>{ avcodec_alloc_context3(nullptr) };
+
+	if (0 > avcodec_parameters_to_context(ctx.get(), codecpar))
+		return nullptr;
+
+	return ctx;
+}
+
+template<AVMediaType MEDIA_TYPE>
+inline MediaStream<MEDIA_TYPE>::MediaStream(const std::string& _url, const Clock& _clock)
+	: url{ _url }, clock{ _clock }
+{
+	using namespace std::string_literals;
+
+	format_ctx = avformat_open_input(url);
+	av_dump_format(format_ctx.get(), 0, url.c_str(), 0);
+
+	stream_index = av_find_best_stream(format_ctx.get(), MEDIA_TYPE, -1, -1, nullptr, 0);
+	timebase = av_q2d(format_ctx->streams[stream_index]->time_base);
+	codec_ctx = make_codec_context(format_ctx->streams[stream_index]->codecpar);
+
+	auto codec = avcodec_find_decoder(codec_ctx->codec_id);
+	if (!codec)
+		throw std::runtime_error("Unsupported codec: "s + avcodec_get_name(codec_ctx->codec_id));
+
+	avcodec_open2(codec_ctx.get(), codec, nullptr);
+
+	working_frame = std::unique_ptr<AVFrame>{ av_frame_alloc() };
+}

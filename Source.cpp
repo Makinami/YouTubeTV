@@ -32,6 +32,10 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 
 int main(int argc, char* argv[])
 {
+
+
+//	return 0;
+
 	if (argc < 2) {
 		fprintf(stderr, "Usage: test <file>\n");
 		return -1;

@@ -15,31 +15,7 @@
 
 using namespace std;
 using namespace std::chrono_literals;
-using namespace std::string_literals;
 using json = nlohmann::json;
-
-unique_ptr<AVFormatContext> avformat_open_input(string_view filename)
-{
-	AVFormatContext* ic = nullptr;
-
-	if (avformat_open_input(&ic, filename.data(), nullptr, nullptr) < 0)
-		throw runtime_error("Could not open format input");
-
-	if (avformat_find_stream_info(ic, nullptr) < 0)
-		throw runtime_error("Could not read stream info");
-
-	return unique_ptr<AVFormatContext>(ic);
-}
-
-unique_ptr<AVCodecContext> make_codec_context(const AVCodecParameters* const codecpar)
-{
-	auto ctx = unique_ptr<AVCodecContext>{ avcodec_alloc_context3(nullptr) };
-
-	if (0 > avcodec_parameters_to_context(ctx.get(), codecpar))
-		return nullptr;
-
-	return ctx;
-}
 
 template<typename ... Args>
 unique_ptr<SwrContext> make_swr_context(Args&&... args)
@@ -80,23 +56,8 @@ int decode(AVCodecContext* avctx, AVFrame* frame, int* got_frame, AVPacket* pkt)
 }
 
 VideoStream::VideoStream(const string& _url, GuardedRenderer& _renderer, const Clock& _clock)
-	: url{ _url }, renderer{ _renderer }, clock{ _clock }
+	: MediaStream{ _url, _clock }, renderer { _renderer }
 {
-	format_ctx = avformat_open_input(url);
-	av_dump_format(format_ctx.get(), 0, url.c_str(), 0);
-
-	stream_index = av_find_best_stream(format_ctx.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-	codec_ctx = make_codec_context(format_ctx->streams[stream_index]->codecpar);
-	timebase = av_q2d(format_ctx->streams[stream_index]->time_base);
-
-	auto codec = avcodec_find_decoder(codec_ctx->codec_id);
-	if (!codec)
-		throw runtime_error("Unsupported codec: "s + avcodec_get_name(codec_ctx->codec_id));
-
-	avcodec_open2(codec_ctx.get(), codec, nullptr);
-
-	working_frame = unique_ptr<AVFrame>{ av_frame_alloc() };
-
 	auto [lc, renderer_ptr] = renderer.get_renderer();
 	current_frame = unique_ptr<SDL_Texture>{ SDL_CreateTexture(renderer_ptr, SDL_PIXELFORMAT_YV12, SDL_TEXTUREACCESS_STATIC, codec_ctx->width, codec_ctx->height) };
 	back_buffer = unique_ptr<SDL_Texture>{ SDL_CreateTexture(renderer_ptr, SDL_PIXELFORMAT_YV12, SDL_TEXTUREACCESS_STATIC, codec_ctx->width, codec_ctx->height) };
@@ -153,12 +114,6 @@ void VideoStream::unpause()
 {
 	paused = false;
 	continue_cv.notify_one();
-}
-
-void VideoStream::seek(chrono::duration<double> _new_time)
-{
-	new_time = _new_time;
-	seek_requested = true;
 }
 
 void VideoStream::decode_frame()
@@ -237,21 +192,8 @@ void sdl_callback(void* ptr, Uint8* stream, int len)
 }
 
 AudioStream::AudioStream(const string& _url, const Clock& _clock)
-	: url{ _url }, clock{ _clock }
+	: MediaStream{ _url, _clock }
 {
-	format_ctx = avformat_open_input(url);
-	av_dump_format(format_ctx.get(), 0, url.c_str(), 0);
-
-	stream_index = av_find_best_stream(format_ctx.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-	codec_ctx = make_codec_context(format_ctx->streams[stream_index]->codecpar);
-	timebase = av_q2d(format_ctx->streams[stream_index]->time_base);
-
-	auto codec = avcodec_find_decoder(codec_ctx->codec_id);
-
-	avcodec_open2(codec_ctx.get(), codec, nullptr);
-
-	working_frame = unique_ptr<AVFrame>{ av_frame_alloc() };
-
 	SDL_AudioSpec wanted_spec, spec;
 	wanted_spec.freq = codec_ctx->sample_rate;
 	wanted_spec.format = AUDIO_F32SYS;
@@ -278,28 +220,22 @@ AudioStream::AudioStream(const string& _url, const Clock& _clock)
 
 void AudioStream::start()
 {
-	SDL_PauseAudioDevice(device_id, 0);
+	unpause();
 }
 
 void AudioStream::stop()
 {
-	SDL_PauseAudioDevice(device_id, 1);
+	pause();
 }
 
 void AudioStream::pause()
 {
-	paused = true;
+	SDL_PauseAudioDevice(device_id, 1);
 }
 
 void AudioStream::unpause()
 {
-	paused = false;
-}
-
-void AudioStream::seek(chrono::duration<double> _new_time)
-{
-	new_time = _new_time;
-	seek_requested = true;
+	SDL_PauseAudioDevice(device_id, 0);
 }
 
 int AudioStream::decode_frame()
@@ -582,26 +518,28 @@ YouTubeVideo::YouTubeVideo(string id, GuardedRenderer& renderer, int media_type)
 	uint32_t code;
 	string cmd = "youtube-dl.exe -J https://www.youtube.com/watch?v="s + id;
 
-	SystemCapture(cmd, L".", out, err, code);
+	//SystemCapture(cmd, L".", out, err, code);
 
-	auto media_details = json::parse(out);
+	//auto media_details = json::parse(out);
 
 	if (media_type & Video)
 	{
-		auto video_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
-			return format["vcodec"].get<string>() != "none";
-		});
-		if (video_format != media_details["requested_formats"].end())
-			video_stream = make_unique<VideoStream>((*video_format)["url"].get<string>(), renderer, clock);
+		//auto video_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
+			//return format["vcodec"].get<string>() != "none";
+		//});
+		//if (video_format != media_details["requested_formats"].end())
+			//video_stream = make_unique<VideoStream>((*video_format)["url"].get<string>(), renderer, clock);
+			video_stream = make_unique<VideoStream>("video.mp4", renderer, clock);
 	}
 
 	if (media_type & Audio)
 	{
-		auto audio_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
-			return format["acodec"].get<string>() != "none";
-		});
-		if (audio_format != media_details["requested_formats"].end())
-			audio_stream = make_unique<AudioStream>((*audio_format)["url"].get<string>(), clock);
+		//auto audio_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
+			//return format["acodec"].get<string>() != "none";
+		//});
+		//if (audio_format != media_details["requested_formats"].end())
+			//audio_stream = make_unique<AudioStream>((*audio_format)["url"].get<string>(), clock);
+		audio_stream = make_unique<AudioStream>("audio.webm", clock);
 	}
 }
 
@@ -650,5 +588,3 @@ auto YouTubeVideo::get_video_frame() -> decltype(std::declval<VideoStream>().get
 		throw std::runtime_error("Media does not have active video stream");
 	return video_stream->get_frame();
 }
-
-
