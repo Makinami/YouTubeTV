@@ -26,7 +26,8 @@ class GuardedRenderer
 public:
 	GuardedRenderer(SDL_Window* window)
 	{
-		renderer = std::unique_ptr<SDL_Renderer>(SDL_CreateRenderer(window, -1, 0));
+		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+		renderer = std::unique_ptr<SDL_Renderer>(SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC));
 	}
 	auto get_renderer()
 	{
@@ -92,6 +93,11 @@ public:
 	}
 
 	void seek(std::chrono::duration<double> _new_time);
+
+	std::tuple<int, int, AVRational> get_size()
+	{
+		return { codec_ctx->width, codec_ctx->height, codec_ctx->sample_aspect_ratio };
+	}
 
 private:
 	void decode_frame();
@@ -206,6 +212,12 @@ public:
 	void seek(std::chrono::duration<double> _new_time);
 
 	auto get_video_frame() -> decltype(std::declval<VideoStream>().get_frame());
+	auto get_video_size()
+	{
+		if (video_stream)
+			return video_stream->get_size();
+		throw std::runtime_error("Media does not have active video stream");
+	}
 	auto get_time()
 	{
 		return clock.time();
