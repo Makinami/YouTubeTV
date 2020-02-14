@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 
 #include "YouTubeVideo.h"
 
@@ -82,12 +83,6 @@ int main(int argc, char *argv[])
 	SetConsoleOutputCP(CP_UTF8);
 #endif
 
-	web::http::client::http_client client(U("https://www.youtube.com"));
-
-	std::cout << homepage_data(client).get().dump(2);
-
-	return 0;
-
 	if (argc < 2)
 	{
 		fprintf(stderr, "Usage: test <file>\n");
@@ -109,24 +104,21 @@ int main(int argc, char *argv[])
 
 	GuardedRenderer renderer(window.get());
 
-	YouTubeVideo media("B084zv59WwA", renderer);
-
-	bool paused = false;
-	media.start();
+	std::unique_ptr<SDL_Texture> image;
+	{
+		auto [rlc, renderer_ptr] = renderer.get_renderer();
+		auto reader = SDL_RWFromFile("thumbnail.jpg", "r");
+		image.reset(IMG_LoadTexture_RW(renderer_ptr, reader, true));
+	}
 
 	SDL_Event event;
 	while (true)
 	{
 		{
 			// won't deadlock 'cause this is the only thread that needs both at the same time
-			auto [flc, frame_ptr] = media.get_video_frame();
 			auto [rlc, renderer_ptr] = renderer.get_renderer();
-			auto [width, height, sar] = media.get_video_size();
-			int wnd_width, wnd_height;
-			SDL_GetWindowSize(window.get(), &wnd_width, &wnd_height);
-			auto rect = calculate_display_rect(wnd_width, wnd_height, width, height, sar);
-			SDL_RenderCopy(renderer_ptr, frame_ptr, nullptr, &rect);
-			flc.unlock();
+			SDL_Rect rect = { 50, 50, 490, 275 };
+			SDL_RenderCopy(renderer_ptr, image.get(), nullptr, &rect);
 
 			SDL_RenderPresent(renderer_ptr);
 		}
@@ -135,43 +127,80 @@ int main(int argc, char *argv[])
 			continue;
 		switch (event.type)
 		{
-		case SDL_KEYDOWN:
-			switch (event.key.keysym.sym)
-			{
-			case SDLK_SPACE:
-				if (paused)
-				{
-					media.unpause();
-					paused = false;
-				}
-				else
-				{
-					media.pause();
-					paused = true;
-				}
+			case SDL_QUIT:
+				SDL_Quit();
+				return 0;
 				break;
-			case SDLK_RIGHT:
-			{
-				auto new_time = media.get_time() + std::chrono::duration<double>{5};
-				media.seek(new_time);
+			default:
 				break;
-			}
-			case SDLK_LEFT:
-			{
-				auto new_time = media.get_time() - std::chrono::duration<double>{5};
-				media.seek(new_time);
-				break;
-			}
-			}
-			break;
-		case SDL_QUIT:
-			SDL_Quit();
-			return 0;
-			break;
-		default:
-			break;
 		}
 	}
+
+	return 0;
+
+	//YouTubeVideo media("B084zv59WwA", renderer);
+
+	//bool paused = false;
+	//media.start();
+
+	//SDL_Event event;
+	//while (true)
+	//{
+	//	{
+	//		// won't deadlock 'cause this is the only thread that needs both at the same time
+	//		auto [flc, frame_ptr] = media.get_video_frame();
+	//		auto [rlc, renderer_ptr] = renderer.get_renderer();
+	//		auto [width, height, sar] = media.get_video_size();
+	//		int wnd_width, wnd_height;
+	//		SDL_GetWindowSize(window.get(), &wnd_width, &wnd_height);
+	//		auto rect = calculate_display_rect(wnd_width, wnd_height, width, height, sar);
+	//		SDL_RenderCopy(renderer_ptr, frame_ptr, nullptr, &rect);
+	//		flc.unlock();
+
+	//		SDL_RenderPresent(renderer_ptr);
+	//	}
+
+	//	if (SDL_PollEvent(&event) == 0)
+	//		continue;
+	//	switch (event.type)
+	//	{
+	//	case SDL_KEYDOWN:
+	//		switch (event.key.keysym.sym)
+	//		{
+	//		case SDLK_SPACE:
+	//			if (paused)
+	//			{
+	//				media.unpause();
+	//				paused = false;
+	//			}
+	//			else
+	//			{
+	//				media.pause();
+	//				paused = true;
+	//			}
+	//			break;
+	//		case SDLK_RIGHT:
+	//		{
+	//			auto new_time = media.get_time() + std::chrono::duration<double>{5};
+	//			media.seek(new_time);
+	//			break;
+	//		}
+	//		case SDLK_LEFT:
+	//		{
+	//			auto new_time = media.get_time() - std::chrono::duration<double>{5};
+	//			media.seek(new_time);
+	//			break;
+	//		}
+	//		}
+	//		break;
+	//	case SDL_QUIT:
+	//		SDL_Quit();
+	//		return 0;
+	//		break;
+	//	default:
+	//		break;
+	//	}
+	//}
 
 	return 0;
 }
