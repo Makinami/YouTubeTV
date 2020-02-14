@@ -52,6 +52,30 @@ auto browser_request()
 	return request;
 }
 
+auto homepage_data(web::http::client::http_client client)
+{
+	auto request = browser_request();
+	request.set_method(web::http::methods::GET);
+	request.set_request_uri(U("/"));
+
+	Concurrency::streams::stringstreambuf resultContainer;
+	return client.request(request).then([=](web::http::http_response response) {
+		return response.body().read_to_end(resultContainer);
+	}).then([=](int /* bytes read */) {
+		std::smatch matches;
+		std::basic_regex reg(R"=(window\["ytInitialData"\].=.(.*);)=");
+
+		if (std::regex_search(resultContainer.collection(), matches, reg))
+		{
+			return nlohmann::json::parse(matches[1].first, matches[1].second);
+		}
+		else
+		{
+			return nlohmann::json();
+		}
+	});
+}
+
 int main(int argc, char *argv[])
 {
 #if defined(_WIN32) || defined(_WIN64)
@@ -60,30 +84,7 @@ int main(int argc, char *argv[])
 
 	web::http::client::http_client client(U("https://www.youtube.com"));
 
-	auto request = browser_request();
-	request.set_method(web::http::methods::GET);
-	request.set_request_uri(U("/"));
-
-	Concurrency::streams::stringstreambuf resultContainer;
-	client.request(request).then([&](web::http::http_response response) {
-		return response.body().read_to_end(resultContainer);
-	}).wait();
-
-	auto result = std::move(resultContainer.collection());
-
-	std::smatch matches;
-	std::basic_regex reg(R"=(window\["ytInitialData"\].=.(.*);)=");
-	if (std::regex_search(result, matches, reg))
-	{
-		std::cout << "Found data:\n";
-
-		auto data = nlohmann::json::parse(matches[1].first, matches[1].second);
-		std::cout << data.dump(2);
-	}
-	else
-	{
-		std::cout << "Data not found";
-	}
+	std::cout << homepage_data(client).get().dump(2);
 
 	return 0;
 
