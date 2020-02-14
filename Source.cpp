@@ -6,13 +6,23 @@
 
 #include <cpprest/http_client.h>
 
+#include <nlohmann/json.hpp>
+
+#if defined(_WIN32) || defined(_WIN64)
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#endif
+
+#include <regex>
+
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
 #undef main
 
 SDL_Rect calculate_display_rect(int scr_width, int scr_height,
-	int dst_width, int dst_height, AVRational pic_sar)
+								int dst_width, int dst_height, AVRational pic_sar)
 {
 	AVRational aspect_ratio = pic_sar;
 	int width, height, x, y;
@@ -25,13 +35,14 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 	/* XXX: we suppose the screen has a 1.0 pixel ratio */
 	height = scr_height;
 	width = av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1;
-	if (width > scr_width) {
+	if (width > scr_width)
+	{
 		width = scr_width;
 		height = av_rescale(width, aspect_ratio.den, aspect_ratio.num) & ~1;
 	}
 	x = (scr_width - width) / 2;
 	y = (scr_height - height) / 2;
-	return { x, y, std::max(width, 1), std::max(height, 1) };
+	return {x, y, std::max(width, 1), std::max(height, 1)};
 }
 
 auto browser_request()
@@ -41,24 +52,43 @@ auto browser_request()
 	return request;
 }
 
-int main(int argc, char* argv[])
+int main(int argc, char *argv[])
 {
+#if defined(_WIN32) || defined(_WIN64)
+	SetConsoleOutputCP(CP_UTF8);
+#endif
+
 	web::http::client::http_client client(U("https://www.youtube.com"));
 
 	auto request = browser_request();
 	request.set_method(web::http::methods::GET);
 	request.set_request_uri(U("/"));
 
-	Concurrency::streams::container_buffer<std::string> result;
+	Concurrency::streams::stringstreambuf resultContainer;
 	client.request(request).then([&](web::http::http_response response) {
-		return response.body().read_to_end(result);
+		return response.body().read_to_end(resultContainer);
 	}).wait();
 
-	std::cout << result.collection();
+	auto result = std::move(resultContainer.collection());
+
+	std::smatch matches;
+	std::basic_regex reg(R"=(window\["ytInitialData"\].=.(.*);)=");
+	if (std::regex_search(result, matches, reg))
+	{
+		std::cout << "Found data:\n";
+
+		auto data = nlohmann::json::parse(matches[1].first, matches[1].second);
+		std::cout << data.dump(2);
+	}
+	else
+	{
+		std::cout << "Data not found";
+	}
 
 	return 0;
 
-	if (argc < 2) {
+	if (argc < 2)
+	{
 		fprintf(stderr, "Usage: test <file>\n");
 		return -1;
 	}
@@ -100,43 +130,45 @@ int main(int argc, char* argv[])
 			SDL_RenderPresent(renderer_ptr);
 		}
 
-		if (SDL_PollEvent(&event) == 0) continue;
+		if (SDL_PollEvent(&event) == 0)
+			continue;
 		switch (event.type)
 		{
-			case SDL_KEYDOWN:
-				switch (event.key.keysym.sym) {
-					case SDLK_SPACE:
-						if (paused)
-						{
-							media.unpause();
-							paused = false;
-						}
-						else
-						{
-							media.pause();
-							paused = true;
-						}
-						break;
-					case SDLK_RIGHT:
-					{
-						auto new_time = media.get_time() + std::chrono::duration<double>{5};
-						media.seek(new_time);
-						break;
-					}
-					case SDLK_LEFT:
-					{
-						auto new_time = media.get_time() - std::chrono::duration<double>{5};
-						media.seek(new_time);
-						break;
-					}
+		case SDL_KEYDOWN:
+			switch (event.key.keysym.sym)
+			{
+			case SDLK_SPACE:
+				if (paused)
+				{
+					media.unpause();
+					paused = false;
+				}
+				else
+				{
+					media.pause();
+					paused = true;
 				}
 				break;
-			case SDL_QUIT:
-				SDL_Quit();
-				return 0;
+			case SDLK_RIGHT:
+			{
+				auto new_time = media.get_time() + std::chrono::duration<double>{5};
+				media.seek(new_time);
 				break;
-			default:
+			}
+			case SDLK_LEFT:
+			{
+				auto new_time = media.get_time() - std::chrono::duration<double>{5};
+				media.seek(new_time);
 				break;
+			}
+			}
+			break;
+		case SDL_QUIT:
+			SDL_Quit();
+			return 0;
+			break;
+		default:
+			break;
 		}
 	}
 
