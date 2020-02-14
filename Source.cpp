@@ -104,10 +104,21 @@ int main(int argc, char *argv[])
 
 	GuardedRenderer renderer(window.get());
 
+	web::http::client::http_client client(U("https://i.ytimg.com"));
+
+	auto request = browser_request();
+	request.set_method(web::http::methods::GET);
+	request.set_request_uri(U("/vi/iR1Ol6TOggk/hq720.jpg?sqp=-oaymwEZCNAFEJQDSFXyq4qpAwsIARUAAIhCGAFwAQ==\u0026rs=AOn4CLBMna1zv0O2V4a_owb4PJZOq_FN5Q"));
+
+	Concurrency::streams::stringstreambuf resultContainer;
+	client.request(request).then([=](web::http::http_response response) {
+		return response.body().read_to_end(resultContainer);
+	}).wait();
+
 	std::unique_ptr<SDL_Texture> image;
 	{
 		auto [rlc, renderer_ptr] = renderer.get_renderer();
-		auto reader = SDL_RWFromFile("thumbnail.jpg", "r");
+		auto reader = SDL_RWFromMem(resultContainer.collection().data(), resultContainer.collection().size());
 		image.reset(IMG_LoadTexture_RW(renderer_ptr, reader, true));
 	}
 
