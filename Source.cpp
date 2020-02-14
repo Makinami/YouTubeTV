@@ -2,6 +2,8 @@
 
 #include "YouTubeVideo.h"
 
+#define USERAGENT "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.0 Safari/537.36 Edg/81.0.416.3"
+
 #include <cpprest/http_client.h>
 
 using namespace std::chrono_literals;
@@ -32,38 +34,27 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 	return { x, y, std::max(width, 1), std::max(height, 1) };
 }
 
-template <typename Container, typename ... Args>
-auto request_whole_body(web::http::client::http_client client, Args&&... args)
+auto browser_request()
 {
-	Concurrency::streams::container_buffer<Container> result;
-
-	std::function<pplx::task<void>(Concurrency::streams::istream)> read;
-	read = [&](Concurrency::streams::istream bodyStream) {
-		return pplx::create_task([=] {
-			auto t = bodyStream.read_to_delim(result, '\n').get();
-			return t;
-		}).then([=](int /*bytesRead*/) {
-			if (bodyStream.is_eof()) {
-				return pplx::create_task([] {});
-			}
-			return read(bodyStream);
-		});
-	};
-
-	client.request(std::forward<Args>(args)...).then([](web::http::http_response response) {
-		return response.content_ready();
-	}).then([&](web::http::http_response response) {
-		return read(response.body());
-	}).wait();
-
-	return std::move(result.collection());
+	auto request = web::http::http_request();
+	request.headers().add(web::http::header_names::user_agent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.0 Safari/537.36 Edg/81.0.416.3");
+	return request;
 }
 
 int main(int argc, char* argv[])
 {
 	web::http::client::http_client client(U("https://www.youtube.com"));
 
-	std::cout << request_whole_body<std::string>(client, web::http::methods::GET, U("/"));
+	auto request = browser_request();
+	request.set_method(web::http::methods::GET);
+	request.set_request_uri(U("/"));
+
+	Concurrency::streams::container_buffer<std::string> result;
+	client.request(request).then([&](web::http::http_response response) {
+		return response.body().read_to_end(result);
+	}).wait();
+
+	std::cout << result.collection();
 
 	return 0;
 
