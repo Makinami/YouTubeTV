@@ -2,6 +2,8 @@
 
 #include "YouTubeVideo.h"
 
+#include <cpprest/http_client.h>
+
 using namespace std::chrono_literals;
 using namespace std::string_literals;
 
@@ -30,11 +32,40 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 	return { x, y, std::max(width, 1), std::max(height, 1) };
 }
 
+template <typename Container, typename ... Args>
+auto request_whole_body(web::http::client::http_client client, Args&&... args)
+{
+	Concurrency::streams::container_buffer<Container> result;
+
+	std::function<pplx::task<void>(Concurrency::streams::istream)> read;
+	read = [&](Concurrency::streams::istream bodyStream) {
+		return pplx::create_task([=] {
+			auto t = bodyStream.read_to_delim(result, '\n').get();
+			return t;
+		}).then([=](int /*bytesRead*/) {
+			if (bodyStream.is_eof()) {
+				return pplx::create_task([] {});
+			}
+			return read(bodyStream);
+		});
+	};
+
+	client.request(std::forward<Args>(args)...).then([](web::http::http_response response) {
+		return response.content_ready();
+	}).then([&](web::http::http_response response) {
+		return read(response.body());
+	}).wait();
+
+	return std::move(result.collection());
+}
+
 int main(int argc, char* argv[])
 {
+	web::http::client::http_client client(U("https://www.youtube.com"));
 
+	std::cout << request_whole_body<std::string>(client, web::http::methods::GET, U("/"));
 
-//	return 0;
+	return 0;
 
 	if (argc < 2) {
 		fprintf(stderr, "Usage: test <file>\n");
