@@ -53,6 +53,13 @@ namespace std
 		}
 	};
 
+	template<> struct default_delete<SDL_Surface> {
+		void operator()(SDL_Surface* ptr)
+		{
+			SDL_FreeSurface(ptr);
+		}
+	};
+
 	template<> struct default_delete<SwrContext> {
 		void operator()(SwrContext* ptr)
 		{

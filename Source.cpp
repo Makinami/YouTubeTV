@@ -16,6 +16,9 @@
 #endif
 
 #include <regex>
+#include <variant>
+
+#include "ImageManager.h"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -44,13 +47,6 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 	x = (scr_width - width) / 2;
 	y = (scr_height - height) / 2;
 	return {x, y, std::max(width, 1), std::max(height, 1)};
-}
-
-auto browser_request()
-{
-	auto request = web::http::http_request();
-	request.headers().add(web::http::header_names::user_agent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.0 Safari/537.36 Edg/81.0.416.3");
-	return request;
 }
 
 auto homepage_data(web::http::client::http_client client)
@@ -104,35 +100,20 @@ int main(int argc, char *argv[])
 
 	GuardedRenderer renderer(window.get());
 
-	web::http::client::http_client client(U("https://i.ytimg.com"));
-
-	auto request = browser_request();
-	request.set_method(web::http::methods::GET);
-	request.set_request_uri(U("/vi/iR1Ol6TOggk/hq720.jpg?sqp=-oaymwEZCNAFEJQDSFXyq4qpAwsIARUAAIhCGAFwAQ==\u0026rs=AOn4CLBMna1zv0O2V4a_owb4PJZOq_FN5Q"));
-
-	Concurrency::streams::stringstreambuf resultContainer;
-	client.request(request).then([=](web::http::http_response response) {
-		return response.body().read_to_end(resultContainer);
-	}).wait();
-
-	std::unique_ptr<SDL_Texture> image;
-	{
-		auto [rlc, renderer_ptr] = renderer.get_renderer();
-		auto reader = SDL_RWFromMem(resultContainer.collection().data(), resultContainer.collection().size());
-		image.reset(IMG_LoadTexture_RW(renderer_ptr, reader, true));
-	}
+	ImageManager img_mgr(renderer);
 
 	SDL_Event event;
 	while (true)
 	{
+		auto [rlc, renderer_ptr] = renderer.get_renderer();
+		if (auto img = img_mgr.get_image("https://i.ytimg.com/vi/iR1Ol6TOggk/hq720.jpg"); img.is_done())
 		{
 			// won't deadlock 'cause this is the only thread that needs both at the same time
-			auto [rlc, renderer_ptr] = renderer.get_renderer();
 			SDL_Rect rect = { 50, 50, 490, 275 };
-			SDL_RenderCopy(renderer_ptr, image.get(), nullptr, &rect);
+			SDL_RenderCopy(renderer_ptr, img.get().get(), nullptr, &rect);
 
-			SDL_RenderPresent(renderer_ptr);
 		}
+		SDL_RenderPresent(renderer_ptr);
 
 		if (SDL_PollEvent(&event) == 0)
 			continue;

@@ -19,11 +19,14 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="ImageManager.cpp" />
     <ClCompile Include="Source.cpp" />
     <ClCompile Include="YouTubeVideo.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Deleters.h" />
+    <ClInclude Include="ImageManager.h" />
+    <ClInclude Include="Renderer.h" />
     <ClInclude Include="YouTubeVideo.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
