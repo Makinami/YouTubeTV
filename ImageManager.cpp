@@ -1,14 +1,11 @@
+#include "pch.h"
+
 #include "ImageManager.h"
 
-#include <assert.h>
-#include <regex>
+#include "YouTubeCore.h"
 
+using namespace YouTube;
 using namespace std::string_literals;
-
-ImageManager::ImageManager(const GuardedRenderer& _renderer)
-	: renderer{ _renderer }
-{
-}
 
 pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::get_image(const std::string& url)
 {
@@ -32,7 +29,7 @@ pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::load_image(const std::str
 	return images.insert({ url, get_client(domain).request(request).then([=](web::http::http_response response) {
 		return response.body().read_to_end(resultContainer);
 	}).then([=](int /* bytes read */) {
-		auto [rlc, renderer_ptr] = renderer.get_renderer();
+		auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
 		auto reader = SDL_RWFromMem(resultContainer.collection().data(), resultContainer.collection().size());
 		return std::shared_ptr<SDL_Texture>{std::unique_ptr<SDL_Texture>{ IMG_LoadTexture_RW(renderer_ptr, reader, true) }};
 	}) }).first->second;
@@ -43,7 +40,7 @@ std::pair<std::string, std::string> ImageManager::parse_url(const std::string& u
 	static std::regex reg(R"=((https?://[^\/]+)(\/?.*))=");
 	std::smatch matches;
 	if (!std::regex_match(url, matches, reg))
-		assert(false);
+		return { "", "" };
 
 	return std::pair<std::string, std::string>{
 		matches[1],

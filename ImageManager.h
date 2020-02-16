@@ -29,7 +29,6 @@ class ImageManager
 	using img_task = pplx::task<img_ptr>;
 
 public:
-	ImageManager(const GuardedRenderer& _renderer);
 	img_task get_image(const std::string& url);
 	img_task load_image(const std::string& url);
 
@@ -38,7 +37,6 @@ private:
 	web::http::client::http_client get_client(std::string domain);
 
 private:
-	const GuardedRenderer& renderer;
 	std::unordered_map<std::string, img_task> images;
 	std::unordered_map<std::string, web::http::client::http_client> clients;
 

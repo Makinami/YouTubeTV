@@ -1,3 +1,7 @@
+#include "pch.h"
+
+#include "YouTubeCore.h"
+
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
@@ -22,6 +26,8 @@
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
+
+using namespace YouTube;
 
 #undef main
 
@@ -73,40 +79,43 @@ auto homepage_data(web::http::client::http_client client)
 	});
 }
 
+class MediaItem
+{
+public:
+	enum class Type { tvMusicVideoRenderer, gridPlaylistRenderer, unknownRenderer };
+
+private:
+	static const std::unordered_map<std::string, Type> type_mapping;
+
+public:
+	MediaItem(const nlohmann::json& data);
+
+	std::string thumbnail_url() const;
+	auto thumbnail() const -> decltype(std::declval<ImageManager>().load_image(std::declval<std::string>()));
+
+private:
+	std::string video_id;
+	std::string playlist_id;
+	Type type;
+};
+
+const std::unordered_map<std::string, MediaItem::Type> MediaItem::type_mapping {
+	{ "tvMusicVideoRenderer", Type::tvMusicVideoRenderer },
+	{ "gridPlaylistRenderer", Type::gridPlaylistRenderer },
+	{ "unknownRenderer", Type::unknownRenderer }
+};
+
+ImageManager* img_mgr_ptr;
+
 int main(int argc, char *argv[])
 {
-#if defined(_WIN32) || defined(_WIN64)
-	SetConsoleOutputCP(CP_UTF8);
-#endif
-
-	if (argc < 2)
-	{
-		fprintf(stderr, "Usage: test <file>\n");
-		return -1;
-	}
-
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER))
-	{
-		fprintf(stderr, "Could not initialize SDL- %s\n", SDL_GetError());
-		return -1;
-	}
-
-	auto window = std::unique_ptr<SDL_Window>(SDL_CreateWindow("YouTubeTV", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 800, 400, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE));
-	if (!window)
-	{
-		fprintf(stderr, "SDL: could not create window - exiting\n");
-		return -1;
-	}
-
-	GuardedRenderer renderer(window.get());
-
-	ImageManager img_mgr(renderer);
+	YouTube::YouTubeCoreRAII yt_core;
 
 	SDL_Event event;
 	while (true)
 	{
-		auto [rlc, renderer_ptr] = renderer.get_renderer();
-		if (auto img = img_mgr.get_image("https://i.ytimg.com/vi/iR1Ol6TOggk/hq720.jpg"); img.is_done())
+		auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
+		if (auto img = g_ImageManager.get_image("https://i.ytimg.com/vi/iR1Ol6TOggk/hq720.jpg"); img.is_done())
 		{
 			// won't deadlock 'cause this is the only thread that needs both at the same time
 			SDL_Rect rect = { 50, 50, 490, 275 };
@@ -120,7 +129,6 @@ int main(int argc, char *argv[])
 		switch (event.type)
 		{
 			case SDL_QUIT:
-				SDL_Quit();
 				return 0;
 				break;
 			default:
@@ -195,4 +203,28 @@ int main(int argc, char *argv[])
 	//}
 
 	return 0;
+}
+
+MediaItem::MediaItem(const nlohmann::json& data)
+{
+	if (auto it = type_mapping.find(data.begin().key()); it != type_mapping.end())
+		type = it->second;
+	else
+		type = type_mapping.at("unknownRenderer");
+
+	auto& watchEndpoint = data.begin().value()["navigationEndpoint"]["watchEndpoint"];
+	watchEndpoint["videoId"].get_to(video_id);
+	watchEndpoint["playlistId"].get_to(playlist_id);
+
+	img_mgr_ptr->load_image(thumbnail_url());
+}
+
+std::string MediaItem::thumbnail_url() const
+{
+	return "https://i.ytimg.com/vi/"s + video_id + "/hqdefault.jpg";
+}
+
+auto MediaItem::thumbnail() const -> decltype(std::declval<ImageManager>().load_image(std::declval<std::string>()))
+{
+	return img_mgr_ptr->get_image(thumbnail_url());
 }

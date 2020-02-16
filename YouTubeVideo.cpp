@@ -1,3 +1,5 @@
+#include "pch.h"
+
 #include "YouTubeVideo.h"
 
 #pragma comment(lib, "avcodec.lib")
