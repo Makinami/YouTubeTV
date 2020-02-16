@@ -30,6 +30,9 @@
     <ClCompile Include="YouTubeCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="YouTubeAPI.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="YouTubeVideo.h">
@@ -48,6 +51,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="pch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="YouTubeAPI.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

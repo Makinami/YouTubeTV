@@ -4,6 +4,7 @@
 
 class GuardedRenderer;
 class ImageManager;
+class YouTubeAPI;
 
 namespace YouTube
 {
@@ -14,6 +15,7 @@ namespace YouTube
 
 	extern GuardedRenderer g_Renderer;
 	extern ImageManager g_ImageManager;
+	extern YouTubeAPI g_API;
 
 	// RAII wrapper around core system initialization and destruction.
 	// Could be created at the beginning of main, instaed of calling

@@ -12,6 +12,7 @@
 
 #include "Renderer.h"
 #include "ImageManager.h"
+#include "YouTubeAPI.h"
 
 using namespace std;
 using namespace std::literals;
@@ -25,6 +26,7 @@ namespace YouTube
 {
 	GuardedRenderer g_Renderer;
 	ImageManager g_ImageManager;
+	YouTubeAPI g_API;
 }
 
 void YouTube::Initialize()

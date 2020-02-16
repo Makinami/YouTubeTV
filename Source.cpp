@@ -23,6 +23,7 @@
 #include <variant>
 
 #include "ImageManager.h"
+#include "YouTubeAPI.h"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -53,30 +54,6 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 	x = (scr_width - width) / 2;
 	y = (scr_height - height) / 2;
 	return {x, y, std::max(width, 1), std::max(height, 1)};
-}
-
-auto homepage_data(web::http::client::http_client client)
-{
-	auto request = browser_request();
-	request.set_method(web::http::methods::GET);
-	request.set_request_uri(U("/"));
-
-	Concurrency::streams::stringstreambuf resultContainer;
-	return client.request(request).then([=](web::http::http_response response) {
-		return response.body().read_to_end(resultContainer);
-	}).then([=](int /* bytes read */) {
-		std::smatch matches;
-		std::basic_regex reg(R"=(window\["ytInitialData"\].=.(.*);)=");
-
-		if (std::regex_search(resultContainer.collection(), matches, reg))
-		{
-			return nlohmann::json::parse(matches[1].first, matches[1].second);
-		}
-		else
-		{
-			return nlohmann::json();
-		}
-	});
 }
 
 class MediaItem
@@ -111,18 +88,42 @@ int main(int argc, char *argv[])
 {
 	YouTube::YouTubeCoreRAII yt_core;
 
+	std::vector<decltype(g_ImageManager.get_image(std::declval<std::string>()))> images;
+	g_API.get_home_data().then([&](const std::optional<nlohmann::json>& parsed) {
+		if (parsed)
+		{
+			auto videos = (*parsed)["contents"]["twoColumnBrowseResultsRenderer"]["tabs"][0]["tabRenderer"]["content"]["richGridRenderer"]["contents"];
+			for (auto video_data = videos.begin(); video_data != videos.end(); ++video_data)
+			{
+				if (video_data->begin().key() != "richItemRenderer") continue;
+
+				auto richItemRenderer = (*video_data)["richItemRenderer"];
+				auto content = richItemRenderer["content"];
+				auto renderer = content.begin().value();
+				auto navigationEndpoint = renderer["navigationEndpoint"];
+				auto watchEndpoint = navigationEndpoint["watchEndpoint"];
+				auto video_id = watchEndpoint["videoId"].get<std::string>();
+				images.emplace_back(g_ImageManager.load_image("https://i.ytimg.com/vi/"s + video_id + "/hqdefault.jpg"));
+			}
+		}
+	});
+
+
 	SDL_Event event;
 	while (true)
 	{
 		auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
-		if (auto img = g_ImageManager.get_image("https://i.ytimg.com/vi/iR1Ol6TOggk/hq720.jpg"); img.is_done())
-		{
-			// won't deadlock 'cause this is the only thread that needs both at the same time
-			SDL_Rect rect = { 50, 50, 490, 275 };
-			SDL_RenderCopy(renderer_ptr, img.get().get(), nullptr, &rect);
-
-		}
+		int i = 0;
+		std::for_each(images.begin(), images.end(), [renderer_ptr, &i](pplx::task<std::shared_ptr<SDL_Texture>> image) {
+			if (image.is_done())
+			{
+				SDL_Rect rect = { 160 * (i % 5), 90 * (i / 5), 160, 90 };
+				SDL_RenderCopy(renderer_ptr, image.get().get(), nullptr, &rect);
+			}
+			++i;
+		});
 		SDL_RenderPresent(renderer_ptr);
+		rlc.unlock();
 
 		if (SDL_PollEvent(&event) == 0)
 			continue;
