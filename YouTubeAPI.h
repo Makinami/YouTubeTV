@@ -6,32 +6,36 @@
 #include <cpprest/http_client.h>
 #include <nlohmann/json.hpp>
 
+using namespace std::string_literals;
+
+inline std::string wstr_to_str(const std::wstring& str)
+{
+	return { str.begin(), str.end() };
+}
+
 class YouTubeAPI
 {
 public:
 	auto get_home_data()
 	{
-		return pplx::task<std::optional<nlohmann::json>>([this]() -> std::optional<nlohmann::json> {
-			auto request = browser_request();
-			request.set_method(web::http::methods::GET);
-			request.set_request_uri(U("/"));
-
-			Concurrency::streams::stringstreambuf resultContainer;
+		return pplx::task<std::optional<web::json::value>>([this]() -> std::optional<web::json::value> {
 			try {
-				return client.request(request).then([=](web::http::http_response response) {
-					return response.body().read_to_end(resultContainer);
-				}).then([=](int /* bytes read */) {
-					std::smatch matches;
-					std::basic_regex reg(R"=(window\["ytInitialData"\].=.(.*);)=");
+				//auto read = std::ifstream("dump.json");
+				//return web::json::value::parse(read);
 
-					if (std::regex_search(resultContainer.collection(), matches, reg))
-						return nlohmann::json::parse(matches[1].first, matches[1].second);
-					else
-						throw std::runtime_error("Data not found");
+				auto data = client.request(home_request()).then([=](web::http::http_response response) {
+					if (response.status_code() >= 300)
+						throw std::runtime_error("Errow while retrieving home page data: "s + std::to_string(response.status_code()) + " - " + wstr_to_str(response.reason_phrase()));
+					return response.extract_json();
 				}).get();
+
+				auto file = std::ofstream("dump.json", std::ios_base::trunc);
+				data.serialize(file);
+
+				return data;
 			}
 			catch (const std::exception& err) {
-				std::cerr << err.what();
+				std::cerr << err.what() << '\n';
 				return {};
 			}
 		});
@@ -45,7 +49,41 @@ private:
 		return request;
 	}
 
+	auto home_request() -> web::http::http_request
+	{
+		auto request = browser_request();
+		request.set_request_uri(U("/youtubei/v1/browse?key=AIzaSyDCU8hByM-4DrUqRUYnGn-3llEO78bcxq8"));
+		request.set_method(web::http::methods::POST);
+		request.set_body(web::json::value::object({
+			{ U("context"), context_json() },
+			{ U("browseId"), web::json::value(U("default")) }
+			}));
+		return request;
+	}
+
+	auto context_json() -> web::json::value
+	{
+		return web::json::value::object({
+			{ U("client"), client_json() }
+		});
+	}
+
+	auto client_json() -> web::json::value
+	{
+		return web::json::value::object({
+			{ U("clientName"), web::json::value(clientName) },
+			{ U("clientVersion"), web::json::value(clientVersion) },
+			{ U("acceptRegion"), web::json::value(acceptRegion) },
+			{ U("acceptLanguage"), web::json::value(acceptLanguage) }
+		});
+	}
+
 private:
 	web::http::client::http_client client{ U("https://www.youtube.com") };
+
+	utility::string_t clientName = U("TVHTML5");
+	utility::string_t clientVersion = U("6.20180913");
+	utility::string_t acceptRegion = U("GB");
+	utility::string_t acceptLanguage = U("en-GB");
 };
 

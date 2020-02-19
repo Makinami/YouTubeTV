@@ -30,7 +30,7 @@ class ImageManager
 
 public:
 	img_task get_image(const std::string& url);
-	img_task load_image(const std::string& url);
+	void load_image(const std::string& url);
 
 private:
 	std::pair<std::string, std::string> parse_url(const std::string& url);

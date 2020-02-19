@@ -35,24 +35,18 @@ using namespace YouTube;
 SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 								int dst_width, int dst_height, AVRational pic_sar)
 {
-	AVRational aspect_ratio = pic_sar;
-	int width, height, x, y;
-
-	if (av_cmp_q(aspect_ratio, av_make_q(0, 1)) <= 0)
-		aspect_ratio = av_make_q(1, 1);
-
-	aspect_ratio = av_mul_q(aspect_ratio, av_make_q(dst_width, dst_height));
+	auto aspect_ratio = av_make_q(dst_width, dst_height);
 
 	/* XXX: we suppose the screen has a 1.0 pixel ratio */
-	height = scr_height;
-	width = av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1;
+	auto height = scr_height;
+	auto width = int{ av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1 };
 	if (width > scr_width)
 	{
 		width = scr_width;
 		height = av_rescale(width, aspect_ratio.den, aspect_ratio.num) & ~1;
 	}
-	x = (scr_width - width) / 2;
-	y = (scr_height - height) / 2;
+	auto x = (scr_width - width) / 2;
+	auto y = (scr_height - height) / 2;
 	return {x, y, std::max(width, 1), std::max(height, 1)};
 }
 
@@ -62,13 +56,13 @@ public:
 	enum class Type { tvMusicVideoRenderer, gridPlaylistRenderer, unknownRenderer };
 
 private:
-	static const std::unordered_map<std::string, Type> type_mapping;
+	static const std::unordered_map<utility::string_t, Type> type_mapping;
 
 public:
-	MediaItem(const nlohmann::json& data);
+	MediaItem(const web::json::object& data);
 
 	std::string thumbnail_url() const;
-	auto thumbnail() const -> decltype(std::declval<ImageManager>().load_image(std::declval<std::string>()));
+	auto thumbnail() const -> decltype(std::declval<ImageManager>().get_image(std::declval<std::string>()));
 
 private:
 	std::string video_id;
@@ -76,10 +70,10 @@ private:
 	Type type;
 };
 
-const std::unordered_map<std::string, MediaItem::Type> MediaItem::type_mapping {
-	{ "tvMusicVideoRenderer", Type::tvMusicVideoRenderer },
-	{ "gridPlaylistRenderer", Type::gridPlaylistRenderer },
-	{ "unknownRenderer", Type::unknownRenderer }
+const std::unordered_map<utility::string_t, MediaItem::Type> MediaItem::type_mapping {
+	{ U("tvMusicVideoRenderer"), Type::tvMusicVideoRenderer },
+	{ U("gridPlaylistRenderer"), Type::gridPlaylistRenderer },
+	{ U("unknownRenderer"), Type::unknownRenderer }
 };
 
 ImageManager* img_mgr_ptr;
@@ -88,22 +82,34 @@ int main(int argc, char *argv[])
 {
 	YouTube::YouTubeCoreRAII yt_core;
 
-	std::vector<decltype(g_ImageManager.get_image(std::declval<std::string>()))> images;
-	g_API.get_home_data().then([&](const std::optional<nlohmann::json>& parsed) {
-		if (parsed)
-		{
-			auto videos = (*parsed)["contents"]["twoColumnBrowseResultsRenderer"]["tabs"][0]["tabRenderer"]["content"]["richGridRenderer"]["contents"];
-			for (auto video_data = videos.begin(); video_data != videos.end(); ++video_data)
-			{
-				if (video_data->begin().key() != "richItemRenderer") continue;
+	std::cout << _MSC_VER << '\n';
 
-				auto richItemRenderer = (*video_data)["richItemRenderer"];
-				auto content = richItemRenderer["content"];
-				auto renderer = content.begin().value();
-				auto navigationEndpoint = renderer["navigationEndpoint"];
-				auto watchEndpoint = navigationEndpoint["watchEndpoint"];
-				auto video_id = watchEndpoint["videoId"].get<std::string>();
-				images.emplace_back(g_ImageManager.load_image("https://i.ytimg.com/vi/"s + video_id + "/hqdefault.jpg"));
+	std::vector<MediaItem> videos;
+	g_API.get_home_data().then([&](const std::optional<web::json::value>& data) {
+		if (data)
+		{
+			auto sections = data->at(U("contents")).at(U("tvBrowseRenderer")).at(U("content")).at(U("tvSecondaryNavRenderer")).at(U("sections")).as_array();
+
+			auto section = sections[0];
+
+			auto tabs = section.at(U("tvSecondaryNavSectionRenderer")).at(U("tabs")).as_array();
+
+			auto tab = tabs[0];
+
+			auto lists = tab.at(U("tabRenderer")).at(U("content")).at(U("tvSurfaceContentRenderer")).at(U("content")).at(U("sectionListRenderer")).at(U("contents")).as_array();
+
+			auto list = lists[0];
+
+			auto items = list.at(U("shelfRenderer")).at(U("content")).at(U("horizontalListRenderer")).at(U("items")).as_array();
+
+			for (const auto& item : items)
+			{
+				try {
+					videos.emplace_back(item.as_object());
+				}
+				catch (const web::json::json_exception & err) {
+					std::cerr << err.what();
+				}
 			}
 		}
 	});
@@ -112,18 +118,16 @@ int main(int argc, char *argv[])
 	SDL_Event event;
 	while (true)
 	{
-		auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
 		int i = 0;
-		std::for_each(images.begin(), images.end(), [renderer_ptr, &i](pplx::task<std::shared_ptr<SDL_Texture>> image) {
-			if (image.is_done())
+		std::for_each(videos.begin(), videos.end(), [&i](const auto& image) {
+			if (image.thumbnail().is_done())
 			{
 				SDL_Rect rect = { 160 * (i % 5), 90 * (i / 5), 160, 90 };
-				SDL_RenderCopy(renderer_ptr, image.get().get(), nullptr, &rect);
+				g_Renderer.Copy(image.thumbnail().get().get(), nullptr, &rect);
 			}
 			++i;
 		});
-		SDL_RenderPresent(renderer_ptr);
-		rlc.unlock();
+		g_Renderer.Present();
 
 		if (SDL_PollEvent(&event) == 0)
 			continue;
@@ -206,18 +210,17 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-MediaItem::MediaItem(const nlohmann::json& data)
+MediaItem::MediaItem(const web::json::object& data)
 {
-	if (auto it = type_mapping.find(data.begin().key()); it != type_mapping.end())
+	if (auto it = type_mapping.find(data.begin()->first); it != type_mapping.end())
 		type = it->second;
 	else
-		type = type_mapping.at("unknownRenderer");
+		type = type_mapping.at(U("unknownRenderer"));
 
-	auto& watchEndpoint = data.begin().value()["navigationEndpoint"]["watchEndpoint"];
-	watchEndpoint["videoId"].get_to(video_id);
-	watchEndpoint["playlistId"].get_to(playlist_id);
+	auto& watchEndpoint = data.begin()->second.at(U("navigationEndpoint")).at(U("watchEndpoint")).as_object();
+	video_id = wstr_to_str(watchEndpoint.at(U("videoId")).as_string());
 
-	img_mgr_ptr->load_image(thumbnail_url());
+	g_ImageManager.load_image(thumbnail_url());
 }
 
 std::string MediaItem::thumbnail_url() const
@@ -225,7 +228,7 @@ std::string MediaItem::thumbnail_url() const
 	return "https://i.ytimg.com/vi/"s + video_id + "/hqdefault.jpg";
 }
 
-auto MediaItem::thumbnail() const -> decltype(std::declval<ImageManager>().load_image(std::declval<std::string>()))
+auto MediaItem::thumbnail() const -> decltype(std::declval<ImageManager>().get_image(std::declval<std::string>()))
 {
-	return img_mgr_ptr->get_image(thumbnail_url());
+	return g_ImageManager.get_image(thumbnail_url());
 }

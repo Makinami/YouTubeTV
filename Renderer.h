@@ -32,7 +32,13 @@ public:
 		std::unique_lock<std::mutex> lc{ renderer_mtx };
 		return std::tuple<std::unique_lock<std::mutex>, SDL_Renderer*>(std::move(lc), renderer.get());
 	}
-	mutable std::mutex renderer_mtx;
+
+	auto Copy(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int;
+	auto Present() -> void;
+
+	auto LoadTexture(SDL_RWops* src, bool freesrc = true) -> std::unique_ptr<SDL_Texture>;
+
 private:
+	mutable std::mutex renderer_mtx;
 	std::unique_ptr<SDL_Renderer> renderer;
 };

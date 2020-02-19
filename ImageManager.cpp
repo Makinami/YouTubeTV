@@ -12,27 +12,28 @@ pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::get_image(const std::stri
 	if (auto it = images.find(url); it != images.end())
 		return it->second;
 	else
-		return load_image(url);
+	{
+		load_image(url);
+		return get_image(url);
+	}
 }
 
-pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::load_image(const std::string& url)
+void ImageManager::load_image(const std::string& url)
 {
 	auto [domain, uri] = parse_url(url);
 
 	auto lc = std::scoped_lock{ map_write };
-	if (auto it = images.find(url); it != images.end()) return it->second;
+	if (auto it = images.find(url); it != images.end()) return;
 
 	auto request = browser_request();
 	request.set_request_uri(str_to_wstr(uri));
 
-	Concurrency::streams::stringstreambuf resultContainer;
-	return images.insert({ url, get_client(domain).request(request).then([=](web::http::http_response response) {
-		return response.body().read_to_end(resultContainer);
-	}).then([=](int /* bytes read */) {
-		auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
-		auto reader = SDL_RWFromMem(resultContainer.collection().data(), resultContainer.collection().size());
-		return std::shared_ptr<SDL_Texture>{std::unique_ptr<SDL_Texture>{ IMG_LoadTexture_RW(renderer_ptr, reader, true) }};
-	}) }).first->second;
+	images.insert({ url, get_client(domain).request(request).then([=](web::http::http_response response) {
+		return response.extract_vector();
+	}).then([=](const std::vector<unsigned char>& data) {
+		auto reader = SDL_RWFromConstMem(data.data(), data.size());
+		return std::shared_ptr<SDL_Texture>(g_Renderer.LoadTexture(reader));
+	}) });
 }
 
 std::pair<std::string, std::string> ImageManager::parse_url(const std::string& url)
