@@ -2,6 +2,7 @@
 #include "Renderer.h"
 
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL2_gfxPrimitives.h>
 
 using namespace std;
 
@@ -13,6 +14,12 @@ auto GuardedRenderer::Copy(SDL_Texture* texture, const SDL_Rect* srcrect, const 
 {
 	GUARD();
 	return SDL_RenderCopy(renderer.get(), texture, srcrect, dstrect);
+}
+
+auto GuardedRenderer::DrawBox(Rectangle rect, Color color) -> int
+{
+	GUARD();
+	return boxRGBA(renderer.get(), rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, color.r, color.g, color.b, color.a);
 }
 
 auto GuardedRenderer::Present() -> void

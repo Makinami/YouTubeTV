@@ -24,6 +24,7 @@
 
 #include "ImageManager.h"
 #include "YouTubeAPI.h"
+#include "YouTubeUI.h"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -82,8 +83,6 @@ int main(int argc, char *argv[])
 {
 	YouTube::YouTubeCoreRAII yt_core;
 
-	std::cout << _MSC_VER << '\n';
-
 	std::vector<MediaItem> videos;
 	g_API.get_home_data().then([&](const std::optional<web::json::value>& data) {
 		if (data)
@@ -114,31 +113,32 @@ int main(int argc, char *argv[])
 		}
 	});
 
+	YouTube::UI::MainMenu main_menu;
 
 	SDL_Event event;
 	while (true)
 	{
-		int i = 0;
-		std::for_each(videos.begin(), videos.end(), [&i](const auto& image) {
-			if (image.thumbnail().is_done())
-			{
-				SDL_Rect rect = { 160 * (i % 5), 90 * (i / 5), 160, 90 };
-				g_Renderer.Copy(image.thumbnail().get().get(), nullptr, &rect);
-			}
-			++i;
-		});
-		g_Renderer.Present();
-
-		if (SDL_PollEvent(&event) == 0)
-			continue;
-		switch (event.type)
+		if (SDL_PollEvent(&event))
 		{
-			case SDL_QUIT:
-				return 0;
-				break;
-			default:
-				break;
+			switch (event.type)
+			{
+				case SDL_WINDOWEVENT:
+					switch (event.window.event) {
+						case SDL_WINDOWEVENT_SIZE_CHANGED:
+							g_Renderer.UpdateSize();
+							break;
+					}
+					break;
+				case SDL_QUIT:
+					return 0;
+					break;
+				default:
+					break;
+			}
 		}
+
+		main_menu.display({ 0, 0 });
+		g_Renderer.Present();
 	}
 
 	return 0;

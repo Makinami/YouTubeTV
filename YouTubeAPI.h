@@ -16,6 +16,13 @@ inline std::string wstr_to_str(const std::wstring& str)
 class YouTubeAPI
 {
 public:
+	auto get(utility::string_t browseId) -> pplx::task<web::json::value>
+	{
+		return client.request(browse_request(browseId)).then([](web::http::http_response response) {
+			return response.extract_json();
+		});
+	}
+
 	auto get_home_data()
 	{
 		return pplx::task<std::optional<web::json::value>>([this]() -> std::optional<web::json::value> {
@@ -46,6 +53,18 @@ private:
 	{
 		auto request = web::http::http_request();
 		request.headers().add(web::http::header_names::user_agent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.0 Safari/537.36 Edg/81.0.416.3");
+		return request;
+	}
+
+	auto browse_request(utility::string_t browseId) -> web::http::http_request
+	{
+		auto request = browser_request();
+		request.set_request_uri(U("/youtubei/v1/browse?key=AIzaSyDCU8hByM-4DrUqRUYnGn-3llEO78bcxq8"));
+		request.set_method(web::http::methods::POST);
+		request.set_body(web::json::value::object({
+			{ U("context"), context_json() },
+			{ U("browseId"), web::json::value(browseId) }
+		}));
 		return request;
 	}
 
