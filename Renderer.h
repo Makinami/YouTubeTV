@@ -4,6 +4,8 @@
 #include <mutex>
 #include <algorithm>
 
+#include <cpprest/json.h>
+
 #include "Deleters.h"
 
 class GuardedRenderer
@@ -31,6 +33,7 @@ public:
 			  b(std::clamp(_b, 0, 255)),
 			  a(std::clamp(_a, 0, 255))
 		{}
+		operator SDL_Color() const { return { r, g, b, a }; }
 	};
 
 	struct Rectangle
@@ -100,6 +103,8 @@ public:
 	auto Present() -> void;
 
 	auto LoadTexture(SDL_RWops* src, bool freesrc = true) -> std::unique_ptr<SDL_Texture>;
+
+	auto RenderTextToNewTexture(const utility::string_t& text, TTF_Font* const font, Color color) -> std::unique_ptr<SDL_Texture>;
 
 private:
 	mutable std::mutex renderer_mtx;

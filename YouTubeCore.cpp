@@ -3,6 +3,7 @@
 #include "YouTubeCore.h"
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #define NOMINMAX
@@ -13,6 +14,7 @@
 #include "Renderer.h"
 #include "ImageManager.h"
 #include "YouTubeAPI.h"
+#include "FontManager.h"
 
 using namespace std;
 using namespace std::literals;
@@ -27,6 +29,7 @@ namespace YouTube
 	GuardedRenderer g_Renderer;
 	ImageManager g_ImageManager;
 	YouTubeAPI g_API;
+	FontManager g_FontManager;
 }
 
 void YouTube::Initialize()
@@ -40,6 +43,9 @@ void YouTube::Initialize()
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER))
 		throw runtime_error("Could not initialize SDL: "s + SDL_GetError());
 
+	if (TTF_Init() == -1)
+		throw runtime_error("Could not initialize TTF: "s + TTF_GetError());
+
 	window.reset(SDL_CreateWindow("YouTubeTV", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 800, 400, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE));
 	if (window == nullptr)
 		throw runtime_error("Could not create windows: "s + SDL_GetError());
@@ -49,7 +55,10 @@ void YouTube::Initialize()
 
 void YouTube::Shutdown()
 {
-	window.release();
+	g_FontManager.clear();
 
+	window.reset();
+
+	TTF_Quit();
 	SDL_Quit();
 }

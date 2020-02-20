@@ -8,6 +8,7 @@ extern "C" {
 }
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 
 namespace std
 {
@@ -64,6 +65,13 @@ namespace std
 		void operator()(SwrContext* ptr)
 		{
 			swr_free(&ptr);
+		}
+	};
+
+	template<> struct default_delete<TTF_Font> {
+		void operator()(TTF_Font* ptr)
+		{
+			TTF_CloseFont(ptr);
 		}
 	};
 }
