@@ -3,10 +3,93 @@
 #include <memory>
 #include <mutex>
 #include <algorithm>
+#include <limits>
 
-#include <cpprest/json.h>
+#include <cpprest/details/basic_types.h>
 
 #include "Deleters.h"
+
+class GuardedRenderer;
+
+namespace Renderer
+{
+	namespace Dimensions
+	{
+		template<typename T>
+		struct Vec2D
+		{
+			Vec2D() : x{ T{0} }, y{ T{ 0 } } {}
+			Vec2D(T _x, T _y) : x{ _x }, y{ _y } {}
+			virtual ~Vec2D() {};
+			union { T x; T w; };
+			union { T y; T h; };
+		};
+
+		struct ActualPixelsPoint;
+		struct ScaledPixelsPoint;
+		struct ActualPercentagePoint;
+		struct ScaledPercentagePoint;
+
+		struct ActualPixelsPoint : public Vec2D<int>
+		{
+			ActualPixelsPoint(int x, int y) : Vec2D{ x, y } {};
+			ActualPixelsPoint(const ScaledPercentagePoint other);
+			ActualPixelsPoint(const ActualPercentagePoint other);
+		};
+		struct ScaledPixelsPoint : public Vec2D<int>
+		{
+			ScaledPixelsPoint(int x, int y) : Vec2D{ x, y } {};
+		};
+		struct ActualPercentagePoint : public Vec2D<float>
+		{
+			ActualPercentagePoint(float x, float y) : Vec2D{ x, y } {};
+			ActualPercentagePoint(const ScaledPercentagePoint other);
+		};
+		struct ScaledPercentagePoint : public Vec2D<float>
+		{
+			ScaledPercentagePoint(float x, float y) : Vec2D{ x, y } {};
+		};
+
+		using ActualPixelsSize = ActualPixelsPoint;
+		using ScaledPixelsSize = ScaledPixelsPoint;
+		using ActualPercentageSize = ActualPercentagePoint;
+		using ScaledPercentageSize = ScaledPercentagePoint;
+
+		struct ActualPixelsRectangle;
+		struct ScaledPixelsRectangle;
+		struct ActualPercentageRectangle;
+		struct ScaledPercentageRectangle;
+
+		struct ActualPixelsRectangle
+		{
+			ActualPixelsRectangle(const ScaledPercentageRectangle other);
+			ActualPixelsRectangle(const ActualPercentageRectangle other);
+
+			ActualPixelsPoint pos = { 0, 0 };
+			ActualPixelsSize size = { std::numeric_limits<int>::max(), std::numeric_limits<int>::max() };
+		};
+
+		struct ScaledPixelsRectangle
+		{
+			ScaledPixelsPoint pos = { 0, 0 };
+			ScaledPixelsSize size = { std::numeric_limits<int>::max(), std::numeric_limits<int>::max() };
+		};
+
+		struct ActualPercentageRectangle
+		{
+			ActualPercentageRectangle(const ScaledPercentageRectangle other);
+
+			ActualPercentagePoint pos = { 0., 0. };
+			ActualPercentageSize size = { 1., 1. };
+		};
+
+		struct ScaledPercentageRectangle
+		{
+			ScaledPercentagePoint pos = { 0., 0. };
+			ScaledPercentageSize size = { 1., 1. };
+		};
+	}
+}
 
 class GuardedRenderer
 {
@@ -98,13 +181,14 @@ public:
 
 	auto Copy(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int;
 	
-	auto DrawBox(Rectangle rect, Color color) -> int;
+	auto DrawBox(Renderer::Dimensions::ActualPixelsRectangle rect, Color color) -> int;
 
 	auto Present() -> void;
+	auto Clear(Color color = Color{0, 0, 0, 0}) -> void;
 
 	auto LoadTexture(SDL_RWops* src, bool freesrc = true) -> std::unique_ptr<SDL_Texture>;
 
-	auto RenderTextToNewTexture(const utility::string_t& text, TTF_Font* const font, Color color) -> std::unique_ptr<SDL_Texture>;
+	auto RenderTextToNewTexture(const utf8string& text, TTF_Font* const font, Color color) -> std::unique_ptr<SDL_Texture>;
 
 private:
 	mutable std::mutex renderer_mtx;

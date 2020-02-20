@@ -6,6 +6,8 @@
 #include <iostream>
 #include <regex>
 
+#include <cpprest/details/basic_types.h>
+
 #include "Deleters.h"
 
 template <typename Arg>
