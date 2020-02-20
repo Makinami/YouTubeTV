@@ -137,6 +137,7 @@ int main(int argc, char *argv[])
 			}
 		}
 
+		g_Renderer.Clear();
 		main_menu.display({ 0, 0 });
 		g_Renderer.Present();
 	}
