@@ -89,3 +89,19 @@ Renderer::Dimensions::ActualPercentagePoint::ActualPercentagePoint(const ScaledP
 	x = other.x * dim.scaled_width / dim.actual_width;
 	y = other.y * dim.scaled_height / dim.actual_height;
 }
+
+Renderer::Dimensions::ScaledPercentageRectangle::ScaledPercentageRectangle(const ActualPixelsRectangle other)
+	: pos{ other.pos }, size{ other.size }
+{}
+
+Renderer::Dimensions::ScaledPercentagePoint::ScaledPercentagePoint(const ActualPixelsPoint other)
+{
+	auto dim = g_Renderer.GetSize();
+	x = other.x / dim.scaled_width;
+	y = other.y / dim.scaled_height;
+}
+
+Renderer::Dimensions::Rem::operator double()
+{
+	return value * 16 * g_Renderer.GetSize().scaled_width / 1280;
+}

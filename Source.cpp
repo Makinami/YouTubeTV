@@ -138,7 +138,8 @@ int main(int argc, char *argv[])
 		}
 
 		g_Renderer.Clear();
-		main_menu.display({ 0, 0 });
+		auto dim = g_Renderer.GetSize();
+		main_menu.display({ {0, 0}, {dim.actual_width, dim.actual_height} });
 		g_Renderer.Present();
 	}
 

@@ -25,14 +25,27 @@ namespace Renderer
 			union { T y; T h; };
 		};
 
+		struct Rem
+		{
+			operator double();
+
+			double value;
+		};
+
+		inline Rem operator "" _rem(long double value)
+		{
+			return Rem{ static_cast<double>(value) };
+		}
+
 		struct ActualPixelsPoint;
 		struct ScaledPixelsPoint;
 		struct ActualPercentagePoint;
 		struct ScaledPercentagePoint;
+		struct RemPoint;
 
 		struct ActualPixelsPoint : public Vec2D<int>
 		{
-			ActualPixelsPoint(int x, int y) : Vec2D{ x, y } {};
+			ActualPixelsPoint(int x = 0, int y = 0) : Vec2D{ x, y } {};
 			ActualPixelsPoint(const ScaledPercentagePoint other);
 			ActualPixelsPoint(const ActualPercentagePoint other);
 		};
@@ -42,36 +55,45 @@ namespace Renderer
 		};
 		struct ActualPercentagePoint : public Vec2D<float>
 		{
-			ActualPercentagePoint(float x, float y) : Vec2D{ x, y } {};
+			ActualPercentagePoint(float x = 0.f, float y = 0.f) : Vec2D{ x, y } {};
 			ActualPercentagePoint(const ScaledPercentagePoint other);
 		};
 		struct ScaledPercentagePoint : public Vec2D<float>
 		{
 			ScaledPercentagePoint(float x, float y) : Vec2D{ x, y } {};
+			ScaledPercentagePoint(const ActualPixelsPoint other);
+		};
+
+		struct RemPoint : public Vec2D<Rem>
+		{
+			
 		};
 
 		using ActualPixelsSize = ActualPixelsPoint;
 		using ScaledPixelsSize = ScaledPixelsPoint;
 		using ActualPercentageSize = ActualPercentagePoint;
 		using ScaledPercentageSize = ScaledPercentagePoint;
+		using RemSize = RemPoint;
 
 		struct ActualPixelsRectangle;
 		struct ScaledPixelsRectangle;
 		struct ActualPercentageRectangle;
 		struct ScaledPercentageRectangle;
+		struct RemRectangle;
 
 		struct ActualPixelsRectangle
 		{
+			ActualPixelsRectangle(const ActualPixelsPoint _pos, const ActualPixelsSize _size) : pos{ _pos }, size{ _size } {}
 			ActualPixelsRectangle(const ScaledPercentageRectangle other);
 			ActualPixelsRectangle(const ActualPercentageRectangle other);
 
-			ActualPixelsPoint pos = { 0, 0 };
+			ActualPixelsPoint pos;
 			ActualPixelsSize size = { std::numeric_limits<int>::max(), std::numeric_limits<int>::max() };
 		};
 
 		struct ScaledPixelsRectangle
 		{
-			ScaledPixelsPoint pos = { 0, 0 };
+			ScaledPixelsPoint pos;
 			ScaledPixelsSize size = { std::numeric_limits<int>::max(), std::numeric_limits<int>::max() };
 		};
 
@@ -79,14 +101,20 @@ namespace Renderer
 		{
 			ActualPercentageRectangle(const ScaledPercentageRectangle other);
 
-			ActualPercentagePoint pos = { 0., 0. };
+			ActualPercentagePoint pos;
 			ActualPercentageSize size = { 1., 1. };
 		};
 
 		struct ScaledPercentageRectangle
 		{
-			ScaledPercentagePoint pos = { 0., 0. };
+			ScaledPercentageRectangle(const ActualPixelsRectangle other);
+			ScaledPercentagePoint pos;
 			ScaledPercentageSize size = { 1., 1. };
+		};
+
+		struct RemRectangle
+		{
+
 		};
 	}
 }
@@ -144,7 +172,7 @@ public:
 	{
 		WARNING(renderer == nullptr, "Renderer already initialized");
 		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-		renderer = std::unique_ptr<SDL_Renderer>(SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC));
+		renderer = std::unique_ptr<SDL_Renderer>(SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED));
 
 		UpdateSize();
 	}

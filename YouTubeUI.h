@@ -4,8 +4,12 @@
 
 #include <cpprest/http_client.h>
 
+#include "Renderer.h"
+
 namespace YouTube::UI
 {
+	using namespace Renderer::Dimensions;
+
 	struct Position
 	{
 		float x{ 0 }, y{ 0 };
@@ -21,7 +25,7 @@ namespace YouTube::UI
 	protected:
 		enum class State { Uninitialized, Loading, Loaded };
 	public:
-		virtual auto display(Position origin) -> Dimensions = 0;
+		virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize = 0;
 
 	protected:
 		State state = State::Uninitialized;
@@ -32,7 +36,7 @@ namespace YouTube::UI
 	{
 	public:
 		MainMenu();
-		virtual auto display(Position origin) -> Dimensions;
+		virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 
 	private:
 		std::unique_ptr<BasicElement> main_content;
