@@ -71,6 +71,10 @@ Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(const ActualPercentag
 	y = other.y * dim.actual_height;
 }
 
+Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(const RemPoint other)
+	: Vec2D{ other.x, other.y }
+{}
+
 Renderer::Dimensions::ActualPixelsRectangle::ActualPixelsRectangle(const ScaledPercentageRectangle other)
 	: pos{ other.pos }, size{ other.size }
 {}
@@ -101,7 +105,7 @@ Renderer::Dimensions::ScaledPercentagePoint::ScaledPercentagePoint(const ActualP
 	y = other.y / dim.scaled_height;
 }
 
-Renderer::Dimensions::Rem::operator double()
+Renderer::Dimensions::Rem::operator double() const
 {
-	return value * 16 * g_Renderer.GetSize().scaled_width / 1280;
+	return value * 16 * g_Renderer.scaled_width / 1280;
 }

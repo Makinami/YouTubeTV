@@ -46,7 +46,7 @@ void YouTube::Initialize()
 	if (TTF_Init() == -1)
 		throw runtime_error("Could not initialize TTF: "s + TTF_GetError());
 
-	window.reset(SDL_CreateWindow("YouTubeTV", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 800, 400, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE));
+	window.reset(SDL_CreateWindow("YouTubeTV", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1280, 720, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE));
 	if (window == nullptr)
 		throw runtime_error("Could not create windows: "s + SDL_GetError());
 

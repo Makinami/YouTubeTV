@@ -27,7 +27,7 @@ namespace Renderer
 
 		struct Rem
 		{
-			operator double();
+			operator double() const;
 
 			double value;
 		};
@@ -48,6 +48,7 @@ namespace Renderer
 			ActualPixelsPoint(int x = 0, int y = 0) : Vec2D{ x, y } {};
 			ActualPixelsPoint(const ScaledPercentagePoint other);
 			ActualPixelsPoint(const ActualPercentagePoint other);
+			ActualPixelsPoint(const RemPoint other);
 		};
 		struct ScaledPixelsPoint : public Vec2D<int>
 		{
@@ -66,7 +67,7 @@ namespace Renderer
 
 		struct RemPoint : public Vec2D<Rem>
 		{
-			
+			RemPoint(double x, double y) : Vec2D<Rem>{ Rem{x}, Rem{y} } {};
 		};
 
 		using ActualPixelsSize = ActualPixelsPoint;
@@ -127,6 +128,8 @@ public:
 		float scaled_width, scaled_height;
 		int actual_width, actual_height;
 	};
+
+	friend Renderer::Dimensions::Rem;
 
 	struct Color
 	{

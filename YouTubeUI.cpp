@@ -14,6 +14,29 @@ namespace YouTube::UI
 {
 	class HomeTab;
 	class Shelf;
+	class Text : public BasicElement
+	{
+	public:
+		Text() = default;
+		Text(utility::string_t text, Rem _font_size);
+		Text(const Text&) = default;
+		Text& operator=(const Text&) = default;
+		Text(Text&& other) = default;
+		Text& operator=(Text&& other) = default;
+
+		virtual auto display(ActualPixelsRectangle clipping)->ActualPixelsSize;
+
+	private:
+		void render();
+
+	private:
+		utf8string text_str;
+		Rem font_size{ 1 };
+
+		std::shared_ptr<SDL_Texture> title_texture;
+		ActualPixelsSize size;
+		int current_font_size{ -1 };
+	};
 
 	class HomeView : public BasicElement
 	{
@@ -44,18 +67,39 @@ namespace YouTube::UI
 	class Shelf : public BasicElement
 	{
 	public:
-		Shelf(const web::json::object& data);
-		virtual auto display(ActualPixelsRectangle clipping)->ActualPixelsSize;
+	Shelf(const web::json::object &data);
+
+	virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 
 	private:
-		void prerender_title();
-
-	private:
-		utf8string title_str;
-		std::shared_ptr<SDL_Texture> title_texture;
-		int title_w, title_h;
-		int font_size;
+	Text title;
 	};
+}
+
+
+YouTube::UI::Text::Text(utility::string_t text, Rem _font_size)
+	: font_size{ _font_size }
+{
+	text_str = utility::conversions::to_utf8string(std::move(text));
+	render();
+}
+
+auto YouTube::UI::Text::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
+{
+	if (static_cast<int>(font_size) != current_font_size)
+		render();
+
+	auto dst = SDL_Rect{ static_cast<int>(clipping.pos.x), static_cast<int>(clipping.pos.y), static_cast<int>(size.w), static_cast<int>(size.h) };
+	g_Renderer.Copy(title_texture.get(), nullptr, &dst);
+
+	return ActualPixelsSize();
+}
+
+void YouTube::UI::Text::render()
+{
+	title_texture = g_Renderer.RenderTextToNewTexture(text_str, g_FontManager.get_font("Roboto-Regular.ttf", font_size), { 1.f, 1.f, 1.f });
+	SDL_QueryTexture(title_texture.get(), nullptr, nullptr, &size.w, &size.h);
+	current_font_size = font_size;
 }
 
 auto YouTube::UI::HomeView::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
@@ -111,14 +155,13 @@ YouTube::UI::HomeTab::HomeTab(const web::json::object& data)
 
 auto YouTube::UI::HomeTab::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
 {
-	g_Renderer.DrawBox(clipping, { 37, 37, 37 });
+	g_Renderer.DrawBox(clipping, { 47, 47, 47 });
 
 	clipping.pos.y += display_top_navigation(clipping).h;
 
 	for (auto& shelf : shelfs)
 	{
-		shelf.display(clipping);
-		clipping.pos.y += 50;
+		clipping.pos.y += shelf.display(clipping).h;
 	}
 
 	return ActualPixelsSize();
@@ -140,27 +183,14 @@ YouTube::UI::MainMenu::MainMenu()
 YouTube::UI::Shelf::Shelf(const web::json::object& data)
 {
 	ASSERT(data.begin()->first == U("shelfRenderer"));
-
-	title_str = utility::conversions::to_utf8string(data.at(U("shelfRenderer")).at(U("title")).at(U("runs")).at(0).at(U("text")).as_string());
-
-	prerender_title();
+	title = Text{ data.at(U("shelfRenderer")).at(U("title")).at(U("runs")).at(0).at(U("text")).as_string(), 1.5_rem };
 }
 
 auto YouTube::UI::Shelf::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
 {
-	if (font_size != 1.5_rem)
-		prerender_title();
+	title.display(clipping);
 
-	auto dst = SDL_Rect{ static_cast<int>(clipping.pos.x), static_cast<int>(clipping.pos.y), static_cast<int>(title_w), static_cast<int>(title_h) };
-	g_Renderer.Copy(title_texture.get(), nullptr, &dst);
-	return ActualPixelsSize();
-}
-
-void YouTube::UI::Shelf::prerender_title()
-{
-	font_size = 1.5_rem;
-	title_texture = g_Renderer.RenderTextToNewTexture(title_str, g_FontManager.get_font("Roboto-Regular.ttf", font_size), { 1.f, 1.f, 1.f });
-	SDL_QueryTexture(title_texture.get(), nullptr, nullptr, &title_w, &title_h);
+	return RemSize{ 0., 25.375 };
 }
 
 auto YouTube::UI::MainMenu::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
