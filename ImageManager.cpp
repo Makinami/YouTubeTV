@@ -7,7 +7,7 @@
 using namespace YouTube;
 using namespace std::string_literals;
 
-pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::get_image(const std::string& url)
+pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::get_image(const utility::string_t& url)
 {
 	if (auto it = images.find(url); it != images.end())
 		return it->second;
@@ -18,7 +18,7 @@ pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::get_image(const std::stri
 	}
 }
 
-void ImageManager::load_image(const std::string& url)
+void ImageManager::load_image(const utility::string_t& url)
 {
 	auto [domain, uri] = parse_url(url);
 
@@ -26,7 +26,7 @@ void ImageManager::load_image(const std::string& url)
 	if (auto it = images.find(url); it != images.end()) return;
 
 	auto request = browser_request();
-	request.set_request_uri(str_to_wstr(uri));
+	request.set_request_uri(uri);
 
 	images.insert({ url, get_client(domain).request(request).then([=](web::http::http_response response) {
 		return response.extract_vector();
@@ -36,23 +36,23 @@ void ImageManager::load_image(const std::string& url)
 	}) });
 }
 
-std::pair<std::string, std::string> ImageManager::parse_url(const std::string& url)
+std::pair<utility::string_t, utility::string_t> ImageManager::parse_url(const utility::string_t& url)
 {
 	static std::regex reg(R"=((https?://[^\/]+)(\/?.*))=");
-	std::smatch matches;
-	if (!std::regex_match(url, matches, reg))
-		return { "", "" };
+	std::match_results<utility::string_t::const_iterator> matches;
+	if (!std::regex_match(url.begin(), url.end(), matches, reg))
+		return { U(""), U("") };
 
-	return std::pair<std::string, std::string>{
+	return std::pair<utility::string_t, utility::string_t>{
 		matches[1],
-		matches[2] != "" ? std::string{ matches[2] } : "/"s
+		matches[2] != U("") ? utility::string_t{ matches[2] }  : U("/")
 	};
 }
 
-web::http::client::http_client ImageManager::get_client(std::string domain)
+web::http::client::http_client ImageManager::get_client(utility::string_t domain)
 {
 	if (auto it = clients.find(domain); it != clients.end())
 		return it->second;
 
-	return clients.insert({ domain, web::http::client::http_client(str_to_wstr(domain)) }).first->second;
+	return clients.insert({ domain, web::http::client::http_client{domain} }).first->second;
 }

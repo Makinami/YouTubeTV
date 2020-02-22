@@ -25,21 +25,21 @@ inline std::wstring str_to_wstr(const std::string& str)
 
 class ImageManager
 {
+public:
 	using img_ptr = std::shared_ptr<SDL_Texture>;
 	using img_task = pplx::task<img_ptr>;
 
 public:
-	img_task get_image(const std::string& url);
-	void load_image(const std::string& url);
+	img_task get_image(const utility::string_t& url);
+	void load_image(const utility::string_t& url);
 
 private:
-	std::pair<std::string, std::string> parse_url(const std::string& url);
-	web::http::client::http_client get_client(std::string domain);
+	std::pair<utility::string_t, utility::string_t> parse_url(const utility::string_t& url);
+	web::http::client::http_client get_client(utility::string_t domain);
 
 private:
-	std::unordered_map<std::string, img_task> images;
-	std::unordered_map<std::string, web::http::client::http_client> clients;
+	std::unordered_map<utility::string_t, img_task> images;
+	std::unordered_map<utility::string_t, web::http::client::http_client> clients;
 
 	std::mutex map_write;
 };
-
