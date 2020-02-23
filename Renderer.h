@@ -37,6 +37,11 @@ namespace Renderer
 			return Rem{ static_cast<double>(value) };
 		}
 
+		inline Rem operator "" _rem(unsigned long long int value)
+		{
+			return Rem{ static_cast<double>(value) };
+		}
+
 		struct ActualPixelsPoint;
 		struct ScaledPixelsPoint;
 		struct ActualPercentagePoint;
@@ -46,9 +51,9 @@ namespace Renderer
 		struct ActualPixelsPoint : public Vec2D<int>
 		{
 			ActualPixelsPoint(int x = 0, int y = 0) : Vec2D{ x, y } {};
-			ActualPixelsPoint(const ScaledPercentagePoint other);
-			ActualPixelsPoint(const ActualPercentagePoint other);
-			ActualPixelsPoint(const RemPoint other);
+			ActualPixelsPoint(ScaledPercentagePoint other);
+			ActualPixelsPoint(ActualPercentagePoint other);
+			ActualPixelsPoint(RemPoint other);
 		};
 		struct ScaledPixelsPoint : public Vec2D<int>
 		{
@@ -57,17 +62,18 @@ namespace Renderer
 		struct ActualPercentagePoint : public Vec2D<float>
 		{
 			ActualPercentagePoint(float x = 0.f, float y = 0.f) : Vec2D{ x, y } {};
-			ActualPercentagePoint(const ScaledPercentagePoint other);
+			ActualPercentagePoint(ScaledPercentagePoint other);
 		};
 		struct ScaledPercentagePoint : public Vec2D<float>
 		{
 			ScaledPercentagePoint(float x, float y) : Vec2D{ x, y } {};
-			ScaledPercentagePoint(const ActualPixelsPoint other);
+			ScaledPercentagePoint(ActualPixelsPoint other);
 		};
 
 		struct RemPoint : public Vec2D<Rem>
 		{
 			RemPoint(double x, double y) : Vec2D<Rem>{ Rem{x}, Rem{y} } {};
+			RemPoint(ActualPixelsPoint other);
 		};
 
 		using ActualPixelsSize = ActualPixelsPoint;
@@ -84,9 +90,10 @@ namespace Renderer
 
 		struct ActualPixelsRectangle
 		{
-			ActualPixelsRectangle(const ActualPixelsPoint _pos, const ActualPixelsSize _size) : pos{ _pos }, size{ _size } {}
-			ActualPixelsRectangle(const ScaledPercentageRectangle other);
-			ActualPixelsRectangle(const ActualPercentageRectangle other);
+			ActualPixelsRectangle(ActualPixelsPoint _pos, ActualPixelsSize _size) : pos{ _pos }, size{ _size } {}
+			ActualPixelsRectangle(ScaledPercentageRectangle other);
+			ActualPixelsRectangle(ActualPercentageRectangle other);
+			ActualPixelsRectangle(RemRectangle other);
 
 			ActualPixelsPoint pos;
 			ActualPixelsSize size = { std::numeric_limits<int>::max(), std::numeric_limits<int>::max() };
@@ -115,7 +122,9 @@ namespace Renderer
 
 		struct RemRectangle
 		{
-
+			RemRectangle(RemPoint _pos, RemSize _size) : pos{ _pos }, size{ _size } {};
+			RemPoint pos;
+			RemSize size;
 		};
 	}
 }
@@ -210,7 +219,9 @@ public:
 		return { scaled_width, scaled_height, width, height };
 	}
 
-	auto Copy(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int;
+	auto CopyTexture(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int;
+	auto CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect) -> int;
+	auto CopyTexture(SDL_Texture* texture, const Renderer::Dimensions::ActualPixelsRectangle srcrect, const Renderer::Dimensions::ActualPixelsRectangle dstrect) -> int;
 	
 	auto DrawBox(Renderer::Dimensions::ActualPixelsRectangle rect, Color color) -> int;
 

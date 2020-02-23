@@ -40,7 +40,7 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 
 	/* XXX: we suppose the screen has a 1.0 pixel ratio */
 	auto height = scr_height;
-	auto width = int{ av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1 };
+	auto width = int{av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1};
 	if (width > scr_width)
 	{
 		width = scr_width;
@@ -51,67 +51,9 @@ SDL_Rect calculate_display_rect(int scr_width, int scr_height,
 	return {x, y, std::max(width, 1), std::max(height, 1)};
 }
 
-class MediaItem
-{
-public:
-	enum class Type { tvMusicVideoRenderer, gridPlaylistRenderer, unknownRenderer };
-
-private:
-	static const std::unordered_map<utility::string_t, Type> type_mapping;
-
-public:
-	MediaItem(const web::json::object& data);
-
-	std::string thumbnail_url() const;
-	auto thumbnail() const -> decltype(std::declval<ImageManager>().get_image(std::declval<std::string>()));
-
-private:
-	std::string video_id;
-	std::string playlist_id;
-	Type type;
-};
-
-const std::unordered_map<utility::string_t, MediaItem::Type> MediaItem::type_mapping {
-	{ U("tvMusicVideoRenderer"), Type::tvMusicVideoRenderer },
-	{ U("gridPlaylistRenderer"), Type::gridPlaylistRenderer },
-	{ U("unknownRenderer"), Type::unknownRenderer }
-};
-
-ImageManager* img_mgr_ptr;
-
 int main(int argc, char *argv[])
 {
 	YouTube::YouTubeCoreRAII yt_core;
-
-	std::vector<MediaItem> videos;
-	g_API.get_home_data().then([&](const std::optional<web::json::value>& data) {
-		if (data)
-		{
-			auto sections = data->at(U("contents")).at(U("tvBrowseRenderer")).at(U("content")).at(U("tvSecondaryNavRenderer")).at(U("sections")).as_array();
-
-			auto section = sections[0];
-
-			auto tabs = section.at(U("tvSecondaryNavSectionRenderer")).at(U("tabs")).as_array();
-
-			auto tab = tabs[0];
-
-			auto lists = tab.at(U("tabRenderer")).at(U("content")).at(U("tvSurfaceContentRenderer")).at(U("content")).at(U("sectionListRenderer")).at(U("contents")).as_array();
-
-			auto list = lists[0];
-
-			auto items = list.at(U("shelfRenderer")).at(U("content")).at(U("horizontalListRenderer")).at(U("items")).as_array();
-
-			for (const auto& item : items)
-			{
-				try {
-					videos.emplace_back(item.as_object());
-				}
-				catch (const web::json::json_exception & err) {
-					std::cerr << err.what();
-				}
-			}
-		}
-	});
 
 	YouTube::UI::MainMenu main_menu;
 
@@ -122,24 +64,25 @@ int main(int argc, char *argv[])
 		{
 			switch (event.type)
 			{
-				case SDL_WINDOWEVENT:
-					switch (event.window.event) {
-						case SDL_WINDOWEVENT_SIZE_CHANGED:
-							g_Renderer.UpdateSize();
-							break;
-					}
+			case SDL_WINDOWEVENT:
+				switch (event.window.event)
+				{
+				case SDL_WINDOWEVENT_SIZE_CHANGED:
+					g_Renderer.UpdateSize();
 					break;
-				case SDL_QUIT:
-					return 0;
-					break;
-				default:
-					break;
+				}
+				break;
+			case SDL_QUIT:
+				return 0;
+				break;
+			default:
+				break;
 			}
 		}
 
 		g_Renderer.Clear();
 		auto dim = g_Renderer.GetSize();
-		main_menu.display({ {0, 0}, {dim.actual_width, dim.actual_height} });
+		main_menu.display({{0, 0}, {dim.actual_width, dim.actual_height}});
 		g_Renderer.Present();
 	}
 
@@ -210,27 +153,4 @@ int main(int argc, char *argv[])
 	//}
 
 	return 0;
-}
-
-MediaItem::MediaItem(const web::json::object& data)
-{
-	if (auto it = type_mapping.find(data.begin()->first); it != type_mapping.end())
-		type = it->second;
-	else
-		type = type_mapping.at(U("unknownRenderer"));
-
-	auto& watchEndpoint = data.begin()->second.at(U("navigationEndpoint")).at(U("watchEndpoint")).as_object();
-	video_id = wstr_to_str(watchEndpoint.at(U("videoId")).as_string());
-
-	g_ImageManager.load_image(thumbnail_url());
-}
-
-std::string MediaItem::thumbnail_url() const
-{
-	return "https://i.ytimg.com/vi/"s + video_id + "/hqdefault.jpg";
-}
-
-auto MediaItem::thumbnail() const -> decltype(std::declval<ImageManager>().get_image(std::declval<std::string>()))
-{
-	return g_ImageManager.get_image(thumbnail_url());
 }

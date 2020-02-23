@@ -16,10 +16,22 @@ using namespace YouTube;
 	ASSERT(renderer, "Renderer not initialized"); \
 	std::unique_lock<std::mutex> lc{ renderer_mtx }
 
-auto GuardedRenderer::Copy(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int
+auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int
 {
 	GUARD();
 	return SDL_RenderCopy(renderer.get(), texture, srcrect, dstrect);
+}
+
+auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect) -> int
+{
+	return CopyTexture(texture, &srcrect, &dstrect);
+}
+
+auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const ActualPixelsRectangle srcrect, const ActualPixelsRectangle dstrect) -> int
+{
+	auto sdl_srcrect = SDL_Rect{ srcrect.pos.x, srcrect.pos.y, srcrect.size.w, srcrect.size.h };
+	auto sdl_dstrect = SDL_Rect{ dstrect.pos.x, dstrect.pos.y, dstrect.size.w, dstrect.size.h };
+	return CopyTexture(texture, &sdl_srcrect, &sdl_dstrect);
 }
 
 auto GuardedRenderer::DrawBox(ActualPixelsRectangle rect, Color color) -> int
@@ -57,48 +69,52 @@ auto GuardedRenderer::RenderTextToNewTexture(const utf8string& _text, TTF_Font* 
 	return std::unique_ptr<SDL_Texture>(SDL_CreateTextureFromSurface(renderer.get(), surface.get()));
 }
 
-Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(const ScaledPercentagePoint other)
+Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(ScaledPercentagePoint other)
 {
 	auto dim = g_Renderer.GetSize();
 	x = other.x * dim.scaled_width;
 	y = other.y * dim.scaled_height;
 }
 
-Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(const ActualPercentagePoint other)
+Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(ActualPercentagePoint other)
 {
 	auto dim = g_Renderer.GetSize();
 	x = other.x * dim.actual_width;
 	y = other.y * dim.actual_height;
 }
 
-Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(const RemPoint other)
+Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(RemPoint other)
 	: Vec2D{ other.x, other.y }
 {}
 
-Renderer::Dimensions::ActualPixelsRectangle::ActualPixelsRectangle(const ScaledPercentageRectangle other)
+Renderer::Dimensions::ActualPixelsRectangle::ActualPixelsRectangle(ScaledPercentageRectangle other)
 	: pos{ other.pos }, size{ other.size }
 {}
 
-Renderer::Dimensions::ActualPixelsRectangle::ActualPixelsRectangle(const ActualPercentageRectangle other)
+Renderer::Dimensions::ActualPixelsRectangle::ActualPixelsRectangle(ActualPercentageRectangle other)
 	: pos{ other.pos }, size{ other.size }
 {}
 
-Renderer::Dimensions::ActualPercentageRectangle::ActualPercentageRectangle(const ScaledPercentageRectangle other)
+Renderer::Dimensions::ActualPixelsRectangle::ActualPixelsRectangle(RemRectangle other)
 	: pos{ other.pos }, size{ other.size }
 {}
 
-Renderer::Dimensions::ActualPercentagePoint::ActualPercentagePoint(const ScaledPercentagePoint other)
+Renderer::Dimensions::ActualPercentageRectangle::ActualPercentageRectangle(ScaledPercentageRectangle other)
+	: pos{ other.pos }, size{ other.size }
+{}
+
+Renderer::Dimensions::ActualPercentagePoint::ActualPercentagePoint(ScaledPercentagePoint other)
 {
 	auto dim = g_Renderer.GetSize();
 	x = other.x * dim.scaled_width / dim.actual_width;
 	y = other.y * dim.scaled_height / dim.actual_height;
 }
 
-Renderer::Dimensions::ScaledPercentageRectangle::ScaledPercentageRectangle(const ActualPixelsRectangle other)
+Renderer::Dimensions::ScaledPercentageRectangle::ScaledPercentageRectangle(ActualPixelsRectangle other)
 	: pos{ other.pos }, size{ other.size }
 {}
 
-Renderer::Dimensions::ScaledPercentagePoint::ScaledPercentagePoint(const ActualPixelsPoint other)
+Renderer::Dimensions::ScaledPercentagePoint::ScaledPercentagePoint(ActualPixelsPoint other)
 {
 	auto dim = g_Renderer.GetSize();
 	x = other.x / dim.scaled_width;
@@ -108,4 +124,11 @@ Renderer::Dimensions::ScaledPercentagePoint::ScaledPercentagePoint(const ActualP
 Renderer::Dimensions::Rem::operator double() const
 {
 	return value * 16 * g_Renderer.scaled_width / 1280;
+}
+
+Renderer::Dimensions::RemPoint::RemPoint(ActualPixelsPoint other)
+{
+	auto one_over_rem = 1. / static_cast<double>(1_rem);
+	x = Rem{ other.x * one_over_rem };
+	y = Rem{ other.y * one_over_rem };
 }
