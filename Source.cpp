@@ -33,26 +33,25 @@ using namespace YouTube;
 
 #undef main
 
-SDL_Rect calculate_display_rect(int scr_width, int scr_height,
-								int dst_width, int dst_height, AVRational pic_sar)
-{
-	auto aspect_ratio = av_make_q(dst_width, dst_height);
-
-	/* XXX: we suppose the screen has a 1.0 pixel ratio */
-	auto height = scr_height;
-	auto width = int{av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1};
-	if (width > scr_width)
-	{
-		width = scr_width;
-		height = av_rescale(width, aspect_ratio.den, aspect_ratio.num) & ~1;
-	}
-	auto x = (scr_width - width) / 2;
-	auto y = (scr_height - height) / 2;
-	return {x, y, std::max(width, 1), std::max(height, 1)};
-}
-
 int main(int argc, char *argv[])
 {
+	//pplx::cancellation_token_source ctx;
+
+	//auto task = pplx::task<void>([] {
+	//	std::cout << "one\n";
+	//}, ctx.get_token()).then([&] {
+	//	std::cout << "two\n";
+	//	ctx.cancel();
+	//}).then([] {
+	//	std::cout << "three\n";
+	//});
+
+	////ctx.cancel();
+
+	//task.wait();
+
+	//return 0;
+
 	YouTube::YouTubeCoreRAII yt_core;
 
 	YouTube::UI::MainMenu main_menu;

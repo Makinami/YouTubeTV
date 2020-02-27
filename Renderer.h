@@ -28,9 +28,21 @@ namespace Renderer
 		struct Rem
 		{
 			operator double() const;
+			Rem& operator +=(const Rem& other)
+			{
+				value += other.value;
+				return *this;
+			}
+			Rem& operator +=(const double& other)
+			{
+				value += other;
+				return *this;
+			}
 
 			double value;
 		};
+		inline Rem operator+ (Rem x, const Rem& y) { x += y; return x; }
+
 
 		inline Rem operator "" _rem(long double value)
 		{
@@ -94,6 +106,7 @@ namespace Renderer
 			ActualPixelsRectangle(ScaledPercentageRectangle other);
 			ActualPixelsRectangle(ActualPercentageRectangle other);
 			ActualPixelsRectangle(RemRectangle other);
+			ActualPixelsRectangle(SDL_Rect other) : pos{ other.x, other.y }, size{ other.w, other.h } {};
 
 			ActualPixelsPoint pos;
 			ActualPixelsSize size = { std::numeric_limits<int>::max(), std::numeric_limits<int>::max() };
@@ -241,3 +254,26 @@ private:
 
 	float ratio = 16.f / 9.f;
 };
+
+inline SDL_Rect calculate_projection_rect(int dst_width, int dst_height,
+	int src_width, int src_height)
+{
+	auto aspect_ratio = av_make_q(src_width, src_height);
+
+	/* XXX: we suppose the screen has a 1.0 pixel ratio */
+	auto height = dst_height;
+	auto width = int{ av_rescale(height, aspect_ratio.num, aspect_ratio.den) & ~1 };
+	if (width > dst_width)
+	{
+		width = dst_width;
+		height = av_rescale(width, aspect_ratio.den, aspect_ratio.num) & ~1;
+	}
+	auto x = (dst_width - width) / 2;
+	auto y = (dst_height - height) / 2;
+	return { x, y, std::max(width, 1), std::max(height, 1) };
+}
+
+inline SDL_Rect calculate_projection_rect(Renderer::Dimensions::ActualPixelsSize dst, Renderer::Dimensions::ActualPixelsSize src)
+{
+	return calculate_projection_rect(dst.w, dst.h, src.w, src.h);
+}
