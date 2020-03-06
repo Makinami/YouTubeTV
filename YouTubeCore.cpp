@@ -30,6 +30,7 @@ namespace YouTube
 	ImageManager g_ImageManager;
 	YouTubeAPI g_API;
 	FontManager g_FontManager;
+	TextRenderer g_TextRenderer;
 }
 
 void YouTube::Initialize()

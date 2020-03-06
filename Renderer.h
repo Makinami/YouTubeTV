@@ -39,9 +39,21 @@ namespace Renderer
 				return *this;
 			}
 
+			Rem& operator -=(const Rem& other)
+			{
+				value -= other.value;
+				return *this;
+			}
+			Rem& operator -=(const double& other)
+			{
+				value -= other;
+				return *this;
+			}
+
 			double value;
 		};
 		inline Rem operator+ (Rem x, const Rem& y) { x += y; return x; }
+		inline Rem operator- (Rem x, const Rem& y) { x += y; return x; }
 
 
 		inline Rem operator "" _rem(long double value)
@@ -66,7 +78,12 @@ namespace Renderer
 			ActualPixelsPoint(ScaledPercentagePoint other);
 			ActualPixelsPoint(ActualPercentagePoint other);
 			ActualPixelsPoint(RemPoint other);
+
+			ActualPixelsPoint& operator -=(const RemPoint& other);
 		};
+
+		inline ActualPixelsPoint operator- (ActualPixelsPoint x, const RemPoint& y) { x -= y; return x; }
+
 		struct ScaledPixelsPoint : public Vec2D<int>
 		{
 			ScaledPixelsPoint(int x, int y) : Vec2D{ x, y } {};
@@ -140,6 +157,25 @@ namespace Renderer
 			RemSize size;
 		};
 	}
+
+	struct Color
+	{
+		uint8_t r{ 0 }, g{ 0 }, b{ 0 }, a{ 1 };
+		Color() {};
+		Color(float _r, float _g, float _b, float _a = 1.f)
+			: r(std::clamp(static_cast<int>(_r * 255), 0, 255)),
+			g(std::clamp(static_cast<int>(_g * 255), 0, 255)),
+			b(std::clamp(static_cast<int>(_b * 255), 0, 255)),
+			a(std::clamp(static_cast<int>(_a * 255), 0, 255))
+		{}
+		Color(int _r, int _g, int _b, int _a = 255)
+			: r(std::clamp(_r, 0, 255)),
+			g(std::clamp(_g, 0, 255)),
+			b(std::clamp(_b, 0, 255)),
+			a(std::clamp(_a, 0, 255))
+		{}
+		operator SDL_Color() const { return { r, g, b, a }; }
+	};
 }
 
 class GuardedRenderer
@@ -152,25 +188,6 @@ public:
 	};
 
 	friend Renderer::Dimensions::Rem;
-
-	struct Color
-	{
-		uint8_t r{ 0 }, g{ 0 }, b{ 0 }, a{ 1 };
-		Color() {};
-		Color(float _r, float _g, float _b, float _a = 1.f)
-			: r(std::clamp(static_cast<int>(_r * 255), 0, 255)),
-			  g(std::clamp(static_cast<int>(_g * 255), 0, 255)),
-			  b(std::clamp(static_cast<int>(_b * 255), 0, 255)),
-			  a(std::clamp(static_cast<int>(_a * 255), 0, 255))
-		{}
-		Color(int _r, int _g, int _b, int _a = 255)
-			: r(std::clamp(_r, 0, 255)),
-			  g(std::clamp(_g, 0, 255)),
-			  b(std::clamp(_b, 0, 255)),
-			  a(std::clamp(_a, 0, 255))
-		{}
-		operator SDL_Color() const { return { r, g, b, a }; }
-	};
 
 	struct Rectangle
 	{
@@ -197,7 +214,7 @@ public:
 	{
 		WARNING(renderer == nullptr, "Renderer already initialized");
 		SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
-		renderer = std::unique_ptr<SDL_Renderer>(SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED));
+		renderer = std::unique_ptr<SDL_Renderer>(SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE));
 
 		UpdateSize();
 	}
@@ -236,14 +253,20 @@ public:
 	auto CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect) -> int;
 	auto CopyTexture(SDL_Texture* texture, const Renderer::Dimensions::ActualPixelsRectangle srcrect, const Renderer::Dimensions::ActualPixelsRectangle dstrect) -> int;
 	
-	auto DrawBox(Renderer::Dimensions::ActualPixelsRectangle rect, Color color) -> int;
+	auto DrawBox(Renderer::Dimensions::ActualPixelsRectangle rect, Renderer::Color color) -> int;
 
 	auto Present() -> void;
-	auto Clear(Color color = Color{0, 0, 0, 0}) -> void;
+	auto Clear(Renderer::Color color = {0, 0, 0, 0}) -> void;
 
 	auto LoadTexture(SDL_RWops* src, bool freesrc = true) -> std::unique_ptr<SDL_Texture>;
 
-	auto RenderTextToNewTexture(const utf8string& text, TTF_Font* const font, Color color) -> std::unique_ptr<SDL_Texture>;
+	auto RenderTextToNewTexture(const utf8string& text, TTF_Font* const font, Renderer::Color color) -> std::unique_ptr<SDL_Texture>;
+
+	auto CreateTexture(const int format, int access, int w, int h, Renderer::Color color = Renderer::Color{ 0, 0, 0, 255 }, SDL_BlendMode blend = SDL_BLENDMODE_BLEND)->std::unique_ptr<SDL_Texture>;
+	auto CreateTexture(SDL_Surface* surface)->std::unique_ptr<SDL_Texture>;
+
+	auto CopyTextureToTexture(SDL_Texture* src, SDL_Texture* dest, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int;
+	auto CopySurfaceToTexture(SDL_Surface* src, SDL_Texture* dest, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int;
 
 private:
 	mutable std::mutex renderer_mtx;

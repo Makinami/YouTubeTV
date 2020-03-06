@@ -9,6 +9,7 @@
 #include "YouTubeCore.h"
 
 using namespace std;
+using namespace Renderer;
 using namespace Renderer::Dimensions;
 using namespace YouTube;
 
@@ -69,6 +70,47 @@ auto GuardedRenderer::RenderTextToNewTexture(const utf8string& _text, TTF_Font* 
 	return std::unique_ptr<SDL_Texture>(SDL_CreateTextureFromSurface(renderer.get(), surface.get()));
 }
 
+auto GuardedRenderer::CreateTexture(const int format, int access, int w, int h, Color color, SDL_BlendMode blend) -> std::unique_ptr<SDL_Texture>
+{
+	GUARD();
+	auto ptr = std::unique_ptr<SDL_Texture>(SDL_CreateTexture(renderer.get(), format, access, w, h));
+
+	SDL_SetTextureBlendMode(ptr.get(), SDL_BLENDMODE_NONE);
+
+	SDL_SetRenderTarget(renderer.get(), ptr.get());
+	SDL_SetRenderDrawBlendMode(renderer.get(), SDL_BLENDMODE_NONE);
+	SDL_SetRenderDrawColor(renderer.get(), color.r, color.g, color.b, color.a);
+	SDL_RenderFillRect(renderer.get(), nullptr);
+	SDL_SetRenderTarget(renderer.get(), nullptr);
+
+	if (blend != SDL_BLENDMODE_NONE)
+		SDL_SetTextureBlendMode(ptr.get(), blend);
+
+	SDL_SetRenderDrawBlendMode(renderer.get(), SDL_BLENDMODE_BLEND);
+
+	return std::move(ptr);
+}
+
+auto GuardedRenderer::CreateTexture(SDL_Surface* surface) -> std::unique_ptr<SDL_Texture>
+{
+	GUARD();
+	return std::unique_ptr<SDL_Texture>(SDL_CreateTextureFromSurface(renderer.get(), surface));
+}
+
+auto GuardedRenderer::CopyTextureToTexture(SDL_Texture* src, SDL_Texture* dest, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int
+{
+	GUARD();
+	SDL_SetRenderTarget(renderer.get(), dest);
+	SDL_RenderCopy(renderer.get(), src, srcrect, dstrect);
+	SDL_SetRenderTarget(renderer.get(), nullptr);
+	return 0;
+}
+
+auto GuardedRenderer::CopySurfaceToTexture(SDL_Surface* src, SDL_Texture* dest, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int
+{
+	return CopyTextureToTexture(CreateTexture(src).get(), dest, srcrect, dstrect);
+}
+
 Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(ScaledPercentagePoint other)
 {
 	auto dim = g_Renderer.GetSize();
@@ -86,6 +128,13 @@ Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(ActualPercentagePoint
 Renderer::Dimensions::ActualPixelsPoint::ActualPixelsPoint(RemPoint other)
 	: Vec2D{ other.x, other.y }
 {}
+
+ActualPixelsPoint& Renderer::Dimensions::ActualPixelsPoint::operator-=(const RemPoint & other)
+{
+	x -= other.x;
+	y -= other.y;
+	return *this;
+}
 
 Renderer::Dimensions::ActualPixelsRectangle::ActualPixelsRectangle(ScaledPercentageRectangle other)
 	: pos{ other.pos }, size{ other.size }

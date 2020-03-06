@@ -28,6 +28,7 @@
     </ClCompile>
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="Source.cpp" />
+    <ClCompile Include="TextRenderer.cpp" />
     <ClCompile Include="YouTubeAPI.cpp" />
     <ClCompile Include="YouTubeCore.cpp" />
     <ClCompile Include="YouTubeUI.cpp" />
@@ -39,6 +40,7 @@
     <ClInclude Include="ImageManager.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Renderer.h" />
+    <ClInclude Include="TextRenderer.h" />
     <ClInclude Include="YouTubeAPI.h" />
     <ClInclude Include="YouTubeCore.h" />
     <ClInclude Include="YouTubeUI.h" />

@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "YouTubeCore.h"
 
@@ -25,6 +25,8 @@
 #include "ImageManager.h"
 #include "YouTubeAPI.h"
 #include "YouTubeUI.h"
+#include "TextRenderer.h"
+#include "FontManager.h"
 
 using namespace std::chrono_literals;
 using namespace std::string_literals;
@@ -54,7 +56,20 @@ int main(int argc, char *argv[])
 
 	YouTube::YouTubeCoreRAII yt_core;
 
-	YouTube::UI::MainMenu main_menu;
+	//YouTube::UI::MainMenu main_menu;
+
+	using Renderer::Dimensions::operator""_rem;
+
+	auto text = utility::conversions::to_utf8string(U("Evangelion 1.11 Ramiel【ラミエル】 Full HD"));
+
+	auto test = utility::conversions::to_utf8string(U("日本😁語"));
+	std::cout << test.size();
+
+	TextStyle style;
+	style.size = 1.5_rem;
+	style.fonts = { "Roboto-Regular.ttf", "Meiryo-01.ttf" };
+	style.color = { 234, 234, 234 };
+	Renderer::Dimensions::RemRectangle rect = { {20, 20},{21, 3.5} };
 
 	SDL_Event event;
 	while (true)
@@ -67,8 +82,18 @@ int main(int argc, char *argv[])
 				switch (event.window.event)
 				{
 				case SDL_WINDOWEVENT_SIZE_CHANGED:
+					// Needs to destroy all textures using SDL_TEXTUREACCESS_TARGET which TextRenderer ahs plentiful
+					// https://forums.libsdl.org/viewtopic.php?p=40894
+					g_TextRenderer.ClearAll();
 					g_Renderer.UpdateSize();
 					break;
+				}
+				break;
+			case SDL_KEYDOWN:
+				for (auto it = g_KeyboardCallbacks.rbegin(); it != g_KeyboardCallbacks.rend(); ++it)
+				{
+					if (it->operator()(event.key))
+						break;
 				}
 				break;
 			case SDL_QUIT:
@@ -79,9 +104,37 @@ int main(int argc, char *argv[])
 			}
 		}
 
+		g_KeyboardCallbacks.clear();
+
 		g_Renderer.Clear();
-		auto dim = g_Renderer.GetSize();
-		main_menu.display({{0, 0}, {dim.actual_width, dim.actual_height}});
+
+		g_TextRenderer.Render(text, rect, style);
+
+		//if (g_PlayingVideo)
+		//{
+		//	g_KeyboardCallbacks.emplace_back([](SDL_KeyboardEvent event) {
+		//		if (event.keysym.sym == SDLK_ESCAPE)
+		//		{
+		//			g_PlayingVideo = nullptr;
+		//			return true;
+		//		}
+		//		return false;
+		//	});
+
+		//	// display video here
+		//	auto [flc, frame_ptr] = g_PlayingVideo->get_video_frame();
+		//	auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
+		//	auto [width, height, sar] = g_PlayingVideo->get_video_size();
+		//	int wnd_width, wnd_height;
+		//	auto rect = calculate_projection_rect(g_Renderer.GetSize().actual_width, g_Renderer.GetSize().actual_height, width, height);
+		//	SDL_RenderCopy(renderer_ptr, frame_ptr, nullptr, &rect);
+		//	flc.unlock();
+		//}
+		//else
+		//{
+		//	auto dim = g_Renderer.GetSize();
+		//	main_menu.display({{0, 0}, {dim.actual_width, dim.actual_height}});
+		//}
 		g_Renderer.Present();
 	}
 
