@@ -22,6 +22,24 @@ struct Glyph
 {
 	SDL_Texture* texture;
 	SDL_Rect rect;
+	struct Metrics {
+		int minx = 0, maxx = 0, miny = 0, maxy = 0, advance = 0;
+		int height = 0, ascent = 0, descent = 0, line_skip = 0;
+	} metrics;
+	TTF_Font* font;
+	char32_t code_point;
+};
+
+struct Word
+{
+	std::vector<Glyph> characters;
+	int width;
+	int advance;
+};
+
+struct Text
+{
+	std::vector<Word> words;
 };
 
 namespace std
@@ -57,6 +75,7 @@ private:
 
 public:
 	void Render(utf8string text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style);
+	void Render(const Text& text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style);
 
 	void ClearAll();
 

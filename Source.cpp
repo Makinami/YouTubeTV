@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
 
 	TextStyle style;
 	style.size = 1.5_rem;
-	style.fonts = { "Roboto-Regular.ttf", "Meiryo-01.ttf" };
+	style.fonts = { "Arial Bold", "Yu Gothic Bold" };
 	style.color = { 234, 234, 234 };
 	Renderer::Dimensions::RemRectangle rect = { {20, 20},{21, 3.5} };
 

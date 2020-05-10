@@ -12,6 +12,7 @@
 #include "YouTubeAPI.h"
 #include "FontManager.h"
 #include "ImageManager.h"
+#include "YouTubeVideo.h"
 
 using namespace Renderer::Dimensions;
 
@@ -88,13 +89,16 @@ public:
 	virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 	auto display_top_navigation(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 
+	bool keyboard_callback(SDL_KeyboardEvent event);
+
 private:
 	utf8string title;
-
 	std::vector<Shelf> shelfs;
+
+	int selected_shelf = 1;
 };
 
-class Shelf : public BasicElement
+class Shelf
 {
 public:
 	Shelf(const web::json::object &data);
@@ -105,11 +109,15 @@ public:
 	Shelf(Shelf &&) = default;
 	Shelf &operator=(Shelf &&) = default;
 
-	virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
+	virtual auto display(ActualPixelsRectangle clipping, bool selected) -> ActualPixelsSize;
+
+	bool keyboard_callback(SDL_KeyboardEvent event);
 
 private:
 	Text title;
 	std::vector<std::unique_ptr<MediaItem>> items;
+
+	int selected_item = 1;
 };
 
 class MediaItem
@@ -130,13 +138,16 @@ protected:
 public:
 	static auto create(const web::json::object &data) -> std::unique_ptr<MediaItem>;
 
-	virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
+	virtual auto display(ActualPixelsRectangle clipping, bool selected) -> ActualPixelsSize;
+
+	bool keyboard_callback(SDL_KeyboardEvent event);
 
 protected:
 	Type type;
 	Text title;
 	Text secondary;
 	Thumbnail thumbnail;
+	utf8string video_id;
 	//std::variant<ImageManager::img_ptr, pplx::task<void>> thumbnail;
 };
 
@@ -202,7 +213,7 @@ auto YouTube::UI::Text::display(ActualPixelsRectangle clipping) -> ActualPixelsS
 
 void YouTube::UI::Text::render()
 {
-	title_texture = g_Renderer.RenderTextToNewTexture(text_str, g_FontManager.get_font("Roboto-Regular.ttf", font_size), {1.f, 1.f, 1.f});
+	title_texture = g_Renderer.RenderTextToNewTexture(text_str, g_FontManager.get_font("Roboto-Regular.ttf", font_size), {235, 235, 235});
 	SDL_QueryTexture(title_texture.get(), nullptr, nullptr, &size.w, &size.h);
 	current_font_size = font_size;
 }
@@ -256,13 +267,16 @@ YouTube::UI::HomeTab::HomeTab(const web::json::object &data)
 
 auto YouTube::UI::HomeTab::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
 {
+	g_KeyboardCallbacks.emplace_back(std::bind(&HomeTab::keyboard_callback, this, std::placeholders::_1));
+
 	g_Renderer.DrawBox(clipping, {47, 47, 47});
 
 	clipping.pos.y += display_top_navigation(clipping).h;
 
-	for (auto &shelf : shelfs)
+	for (int i = selected_shelf; i < shelfs.size(); ++i)
 	{
-		clipping.pos.y += shelf.display(clipping).h;
+		auto& shelf = shelfs[i];
+		clipping.pos.y += shelf.display(clipping, i == selected_shelf).h;
 	}
 
 	return ActualPixelsSize();
@@ -274,6 +288,21 @@ auto YouTube::UI::HomeTab::display_top_navigation(ActualPixelsRectangle clipping
 	g_Renderer.DrawBox(clipping, {57, 57, 57});
 
 	return clipping.size;
+}
+
+bool YouTube::UI::HomeTab::keyboard_callback(SDL_KeyboardEvent event)
+{
+	if (event.keysym.sym == SDLK_UP && selected_shelf > 0)
+	{
+		--selected_shelf;
+		return true;
+	}
+	if (event.keysym.sym == SDLK_DOWN && selected_shelf < shelfs.size() - 1)
+	{
+		++selected_shelf;
+		return true;
+	}
+	return false;
 }
 
 YouTube::UI::MainMenu::MainMenu()
@@ -294,8 +323,11 @@ YouTube::UI::Shelf::Shelf(const web::json::object &data)
 	}
 }
 
-auto YouTube::UI::Shelf::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
+auto YouTube::UI::Shelf::display(ActualPixelsRectangle clipping, bool selected) -> ActualPixelsSize
 {
+	if (selected)
+		g_KeyboardCallbacks.emplace_back(std::bind(&Shelf::keyboard_callback, this, std::placeholders::_1));
+
 	clipping.pos.x += 3_rem;
 	clipping.pos.y += 0.125_rem /* half of line/font height diff */;
 
@@ -303,13 +335,29 @@ auto YouTube::UI::Shelf::display(ActualPixelsRectangle clipping) -> ActualPixels
 
 	clipping.pos.y += 1.5_rem /* font height */ + 0.125_rem /* half of line/font height diff */ + 1_rem /* margin-top of media item */;
 
-	for (auto &item : items)
+	for (int i = std::max(selected_item - 1, 0); i < items.size(); ++i)
 	{
-		item->display(clipping);
+		auto& item = items[i];
+		item->display(clipping, selected && i == selected_item);
 		clipping.pos.x += 22_rem;
 	}
 
 	return RemSize{0., 25.375};
+}
+
+bool YouTube::UI::Shelf::keyboard_callback(SDL_KeyboardEvent event)
+{
+	if (event.keysym.sym == SDLK_LEFT && selected_item > 0)
+	{
+		--selected_item;
+		return true;
+	}
+	if (event.keysym.sym == SDLK_RIGHT && selected_item < items.size() - 1)
+	{
+		++selected_item;
+		return true;
+	}
+	return false;
 }
 
 auto YouTube::UI::MainMenu::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
@@ -322,7 +370,7 @@ auto YouTube::UI::MainMenu::display(ActualPixelsRectangle clipping) -> ActualPix
 }
 
 YouTube::UI::MediaItem::MediaItem(const web::json::object &data)
-	: thumbnail{data.at(U("thumbnail")).as_object()}
+	: thumbnail{data.at(U("thumbnail")).as_object()}, video_id{utility::conversions::to_utf8string(data.at(U("navigationEndpoint")).at(U("watchEndpoint")).at(U("videoId")).as_string())}
 {
 }
 
@@ -346,18 +394,42 @@ auto YouTube::UI::MediaItem::create(const web::json::object &data) -> std::uniqu
 	return nullptr;
 }
 
-auto YouTube::UI::MediaItem::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
+auto YouTube::UI::MediaItem::display(ActualPixelsRectangle clipping, bool selected) -> ActualPixelsSize
 {
-	auto dstrect = RemRectangle{clipping.pos, RemSize{21, 11.75}};
-	thumbnail.display(dstrect);
+	if (selected)
+		g_KeyboardCallbacks.emplace_back(std::bind(&MediaItem::keyboard_callback, this, std::placeholders::_1));
 
-	dstrect.pos.y += 11.75_rem;
-	title.display(dstrect).y;
-	dstrect.pos.y += 1.5_rem; /* title font size */
-	dstrect.pos.y += 0.5_rem; /* title margin bottom */
-	secondary.display(dstrect);
+	const auto thumbnailrect = [clipping](bool selected) {
+		if (selected)
+			return RemRectangle{ clipping.pos - RemSize{0.5, 0.5}, RemSize{22, 12.25} };
+		else
+			return RemRectangle{ clipping.pos, RemSize{21, 11.75} };
+	}(selected);
+
+	thumbnail.display(thumbnailrect);
+
+	clipping.pos.y += 11.75_rem;
+
+	if (selected)
+		g_Renderer.DrawBox(RemRectangle{ clipping.pos - RemSize{0.5, 0}, RemSize{22, 8.15 } }, { 235, 235, 235 });
+
+	title.display(clipping).y;
+	clipping.pos.y += 1.5_rem; /* title font size */
+	clipping.pos.y += 0.5_rem; /* title margin bottom */
+	secondary.display(clipping);
 
 	return ActualPixelsSize();
+}
+
+bool YouTube::UI::MediaItem::keyboard_callback(SDL_KeyboardEvent event)
+{
+	if (event.keysym.sym == SDLK_RETURN)
+	{
+		g_PlayingVideo = std::make_unique<YouTubeVideo>(video_id, g_Renderer);
+		g_PlayingVideo->start();
+		return true;
+	}
+	return false;
 }
 
 YouTube::UI::MusicVideo::MusicVideo(const web::json::object &data)

@@ -518,30 +518,30 @@ YouTubeVideo::YouTubeVideo(string id, GuardedRenderer& renderer, int media_type)
 	string out;
 	string err;
 	uint32_t code;
-	string cmd = "youtube-dl.exe -J https://www.youtube.com/watch?v="s + id;
+	string cmd = ".\\youtube-dl.exe -J https://www.youtube.com/watch?v="s + id;
 
-	//SystemCapture(cmd, L".", out, err, code);
+	SystemCapture(cmd, L".", out, err, code);
 
-	//auto media_details = json::parse(out);
+	auto media_details = json::parse(out);
 
 	if (media_type & Video)
 	{
-		//auto video_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
-			//return format["vcodec"].get<string>() != "none";
-		//});
-		//if (video_format != media_details["requested_formats"].end())
-			//video_stream = make_unique<VideoStream>((*video_format)["url"].get<string>(), renderer, clock);
-			video_stream = make_unique<VideoStream>("video.mp4", renderer, clock);
+		auto video_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
+			return format["vcodec"].get<string>() != "none";
+		});
+		if (video_format != media_details["requested_formats"].end())
+			video_stream = make_unique<VideoStream>((*video_format)["url"].get<string>(), renderer, clock);
+			//video_stream = make_unique<VideoStream>("video.mp4", renderer, clock);
 	}
 
 	if (media_type & Audio)
 	{
-		//auto audio_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
-			//return format["acodec"].get<string>() != "none";
-		//});
-		//if (audio_format != media_details["requested_formats"].end())
-			//audio_stream = make_unique<AudioStream>((*audio_format)["url"].get<string>(), clock);
-		audio_stream = make_unique<AudioStream>("audio.webm", clock);
+		auto audio_format = find_if(media_details["requested_formats"].begin(), media_details["requested_formats"].end(), [](const auto& format) {
+			return format["acodec"].get<string>() != "none";
+		});
+		if (audio_format != media_details["requested_formats"].end())
+			audio_stream = make_unique<AudioStream>((*audio_format)["url"].get<string>(), clock);
+		//audio_stream = make_unique<AudioStream>("audio.webm", clock);
 	}
 }
 

@@ -7,6 +7,7 @@
 #include "cpprest/json.h"
 
 #include <SDL2/SDL2_gfxPrimitives.h>
+#include <numeric>
 
 using namespace YouTube;
 
@@ -41,13 +42,15 @@ std::u32string to_u32string(std::string text)
 
 void TextRenderer::Render(utf8string text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style)
 {
-	std::vector<TTF_Font*> fonts;
-	std::transform(style.fonts.begin(), style.fonts.end(), std::back_inserter(fonts), [size = style.size](const std::string& filename) {
-		return g_FontManager.get_font(filename, size);
-	});
+    g_Renderer.DrawBox(rect, { 0.25f, 0.25f, 0.25f, 1.0f });
+
+    std::vector<TTF_Font*> fonts;
+    std::transform(style.fonts.begin(), style.fonts.end(), std::back_inserter(fonts), [size = style.size](const std::string& filename) {
+        return g_FontManager.get_font(filename, size);
+    });
 
     std::basic_string<char8_t> internal = u8"z\u00df\u6c34\U0001f34c"; // L"zß水🍌"
-    
+
     auto external = to_u32string(text);
 
     std::vector<Glyph> glyphs;
@@ -66,17 +69,80 @@ void TextRenderer::Render(utf8string text, Renderer::Dimensions::ActualPixelsRec
         return get_glyph(font, code_point);
     });
 
-    for (auto glyph : glyphs)
-    {
-        g_Renderer.CopyTexture(glyph.texture, glyph.rect, { {rect.pos.x, rect.pos.y}, {glyph.rect.w, glyph.rect.h} });
-        rect.pos.x += glyph.rect.w;
+    std::adjacent_difference(glyphs.rbegin(), glyphs.rend(), glyphs.rbegin(), [](const Glyph A, const Glyph B) -> Glyph {
+        auto ret = A;
+        if (A.font == B.font)
+        {
+            ret.metrics.advance = ret.rect.w + TTF_GetFontKerningSizeGlyphs(A.font, A.code_point, B.code_point);
+        }
+        else
+        {
+            ret.metrics.advance = ret.rect.w;
+        }
+        return ret;
+    });
+
+    Text preprocessed_text;
+    preprocessed_text.words.emplace_back();
+    for (auto glyph : glyphs) {
+        if (glyph.code_point == ' ')
+        {
+            // add advance and glyph without adding width and start next word
+            preprocessed_text.words.back().advance += glyph.metrics.advance;
+            preprocessed_text.words.back().characters.emplace_back(std::move(glyph));
+            preprocessed_text.words.emplace_back();
+        }
+        else if (glyph.code_point < 256)
+        {
+            // add advance, width and glyph
+            preprocessed_text.words.back().width += glyph.metrics.advance;
+            preprocessed_text.words.back().advance += glyph.metrics.advance;
+            preprocessed_text.words.back().characters.emplace_back(std::move(glyph));
+        }
+        else
+        {
+            // finish word if non-zero length
+            if (preprocessed_text.words.back().characters.size())
+                preprocessed_text.words.emplace_back();
+
+            // add advance, width and glyph and start next word
+            preprocessed_text.words.back().width += glyph.metrics.advance;
+            preprocessed_text.words.back().advance += glyph.metrics.advance;
+            preprocessed_text.words.back().characters.emplace_back(std::move(glyph));
+            preprocessed_text.words.emplace_back();
+        }
     }
 
-    SDL_Rect rect2 = { 0, 0, 2000, 29 };
-    g_Renderer.DrawBox(rect2, { 0.5f, 0.5f, 0.5f, 1.0f });
-    rect2.x = 0;
-    rect2.y = 0;
-    g_Renderer.CopyTexture(atlases[29][0].texture.get(), nullptr, &rect2);
+    auto line_height = TTF_FontLineSkip(*fonts.begin());
+    auto max_lines = floor(static_cast<float>(rect.size.h) / line_height);
+    
+    auto glyph_position = rect.pos;
+    glyph_position.y += TTF_FontAscent(*fonts.begin());
+
+    auto remaining_width = rect.size.w;
+    auto it = preprocessed_text.words.begin();
+    auto line_count = 1;
+    while (it != preprocessed_text.words.end() && line_count <= max_lines)
+    {
+        if (it->width > remaining_width)
+        {
+            glyph_position.x = rect.pos.x;
+            glyph_position.y += line_height;
+            remaining_width = rect.size.w;
+            ++line_count;
+            continue;
+        }
+
+        for (auto glyph : it->characters)
+        {
+            g_Renderer.CopyTexture(glyph.texture, glyph.rect, { {glyph_position.x, glyph_position.y - glyph.metrics.ascent}, {glyph.rect.w, glyph.rect.h} }, style.color);
+            glyph_position.x += glyph.metrics.advance;
+        }
+
+        remaining_width -= it->advance;
+
+        ++it;
+    }
 }
 
 void TextRenderer::ClearAll()
@@ -107,7 +173,13 @@ Glyph TextRenderer::generate_glyph(TTF_Font* font, char16_t code_point)
 
     atlas.used += surface->w;
 
-    return glyphs.emplace(std::make_pair(font, code_point), Glyph{ atlas.texture.get(), glyph_position }).first->second;
+    auto metrics = Glyph::Metrics{ .height = TTF_FontHeight(font), .ascent = TTF_FontAscent(font), .descent = TTF_FontDescent(font), .line_skip = TTF_FontLineSkip(font) };
+    if (TTF_GlyphMetrics(font, code_point, &metrics.minx, &metrics.maxx, &metrics.miny, &metrics.maxy, &metrics.advance))
+    {
+        std::cerr << "Font doesn't have codepoint\n";
+    }
+
+    return glyphs.emplace(std::make_pair(font, code_point), Glyph{ atlas.texture.get(), glyph_position, metrics, font, code_point }).first->second;
 }
 
 TextRenderer::Atlas& TextRenderer::get_atlas(int height, int width)

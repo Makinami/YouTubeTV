@@ -17,22 +17,24 @@ using namespace YouTube;
 	ASSERT(renderer, "Renderer not initialized"); \
 	std::unique_lock<std::mutex> lc{ renderer_mtx }
 
-auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int
+auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect, Renderer::Color color) -> int
 {
 	GUARD();
+	SDL_SetTextureColorMod(texture, color.r, color.g, color.b);
+	SDL_SetTextureAlphaMod(texture, color.a);
 	return SDL_RenderCopy(renderer.get(), texture, srcrect, dstrect);
 }
 
-auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect) -> int
+auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect, Renderer::Color color) -> int
 {
-	return CopyTexture(texture, &srcrect, &dstrect);
+	return CopyTexture(texture, &srcrect, &dstrect, color);
 }
 
-auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const ActualPixelsRectangle srcrect, const ActualPixelsRectangle dstrect) -> int
+auto GuardedRenderer::CopyTexture(SDL_Texture* texture, const ActualPixelsRectangle srcrect, const ActualPixelsRectangle dstrect, Renderer::Color color) -> int
 {
 	auto sdl_srcrect = SDL_Rect{ srcrect.pos.x, srcrect.pos.y, srcrect.size.w, srcrect.size.h };
 	auto sdl_dstrect = SDL_Rect{ dstrect.pos.x, dstrect.pos.y, dstrect.size.w, dstrect.size.h };
-	return CopyTexture(texture, &sdl_srcrect, &sdl_dstrect);
+	return CopyTexture(texture, &sdl_srcrect, &sdl_dstrect, color);
 }
 
 auto GuardedRenderer::DrawBox(ActualPixelsRectangle rect, Color color) -> int

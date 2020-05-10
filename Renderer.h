@@ -249,9 +249,9 @@ public:
 		return { scaled_width, scaled_height, width, height };
 	}
 
-	auto CopyTexture(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect) -> int;
-	auto CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect) -> int;
-	auto CopyTexture(SDL_Texture* texture, const Renderer::Dimensions::ActualPixelsRectangle srcrect, const Renderer::Dimensions::ActualPixelsRectangle dstrect) -> int;
+	auto CopyTexture(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect, Renderer::Color color = { 255, 255, 255, 0 }) -> int;
+	auto CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect, Renderer::Color color = { 255, 255, 255, 0 }) -> int;
+	auto CopyTexture(SDL_Texture* texture, const Renderer::Dimensions::ActualPixelsRectangle srcrect, const Renderer::Dimensions::ActualPixelsRectangle dstrect, Renderer::Color color = { 255, 255, 255, 0 }) -> int;
 	
 	auto DrawBox(Renderer::Dimensions::ActualPixelsRectangle rect, Renderer::Color color) -> int;
 
