@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "TextRenderer.h"
 
 #include "YouTubeCore.h"
@@ -13,12 +13,72 @@ using namespace YouTube;
 
 using namespace std::string_literals;
 
+void apply_kerning(std::vector<Glyph>& glyphs)
+{
+    std::adjacent_difference(glyphs.rbegin(), glyphs.rend(), glyphs.rbegin(), [](const Glyph A, const Glyph B) -> Glyph {
+        auto ret = A;
+        if (A.font == B.font)
+        {
+            ret.metrics.advance = ret.rect.w + TTF_GetFontKerningSizeGlyphs(A.font, static_cast<uint16_t>(A.code_point), static_cast<uint16_t>(B.code_point));
+        }
+        else
+        {
+            ret.metrics.advance = ret.rect.w;
+        }
+        return ret;
+    });
+}
+
+inline std::vector<Glyph> apply_kerning(std::vector<Glyph>&& glyphs)
+{
+    apply_kerning(glyphs);
+
+    return std::move(glyphs);
+}
+
+std::vector<Word> group_into_words(const std::vector<Glyph>& glyphs)
+{
+    std::vector<Word> words;
+    words.emplace_back();
+    for (auto glyph : glyphs) {
+        if (glyph.code_point == ' ')
+        {
+            // add advance and glyph without adding width and start next word
+            words.back().advance += glyph.metrics.advance;
+            words.back().characters.emplace_back(std::move(glyph));
+            words.emplace_back();
+        }
+        else if (glyph.code_point < 256)
+        {
+            // add advance, width and glyph
+            words.back().width += glyph.metrics.advance;
+            words.back().advance += glyph.metrics.advance;
+            words.back().characters.emplace_back(std::move(glyph));
+        }
+        else
+        {
+            // finish word if non-zero length
+            if (words.back().characters.size())
+                words.emplace_back();
+
+            // add advance, width and glyph and start next word
+            words.back().width += glyph.metrics.advance;
+            words.back().advance += glyph.metrics.advance;
+            words.back().characters.emplace_back(std::move(glyph));
+            words.emplace_back();
+        }
+    }
+    if (words.size() && words.back().characters.size() == 0)
+        words.pop_back();
+
+    return words;
+}
+
 std::unique_ptr<SDL_Texture> test;
 
 std::u32string to_u32string(std::u8string internal)
 {
     auto& f = std::use_facet<std::codecvt<char32_t, char8_t, std::mbstate_t>>(std::locale());
-    //std::basic_string<char8_t> internal = u8"z\u00df\u6c34\U0001f34c"; // L"zß水🍌"
 
     // note that the following can be done with wstring_convert
     std::mbstate_t mb{}; // initial shift state
@@ -40,94 +100,46 @@ std::u32string to_u32string(std::string text)
     return to_u32string(internal);
 }
 
-void TextRenderer::Render(utf8string text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style)
+PreprocessedText TextRenderer::PreprocessText(utf8string text, TextStyle style)
 {
-    g_Renderer.DrawBox(rect, { 0.25f, 0.25f, 0.25f, 1.0f });
-
     std::vector<TTF_Font*> fonts;
     std::transform(style.fonts.begin(), style.fonts.end(), std::back_inserter(fonts), [size = style.size](const std::string& filename) {
         return g_FontManager.get_font(filename, size);
     });
 
-    std::basic_string<char8_t> internal = u8"z\u00df\u6c34\U0001f34c"; // L"zß水🍌"
+    return {
+        .words = group_into_words(
+            apply_kerning(transform_to_glyphs(to_u32string(text), fonts))
+        ),
+        .line_height = TTF_FontLineSkip(*fonts.begin())
+    };
+}
 
-    auto external = to_u32string(text);
-
-    std::vector<Glyph> glyphs;
-    std::transform(external.begin(), external.end(), std::back_inserter(glyphs), [&, this](char32_t code_point) {
-        if (code_point > std::numeric_limits<char16_t>::max())
-            code_point = 0xFFFD;
-
-        auto it = std::find_if(fonts.begin(), fonts.end(), [code_point](auto font) {
-            return TTF_GlyphIsProvided(font, code_point);
-        });
-        if (it == fonts.end())
-            --it; // just use the last font even if it's missing the glyph
-
-        auto font = *it;
-
-        return get_glyph(font, code_point);
-    });
-
-    std::adjacent_difference(glyphs.rbegin(), glyphs.rend(), glyphs.rbegin(), [](const Glyph A, const Glyph B) -> Glyph {
-        auto ret = A;
-        if (A.font == B.font)
+void TextRenderer::Render(utf8string text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style)
         {
-            ret.metrics.advance = ret.rect.w + TTF_GetFontKerningSizeGlyphs(A.font, A.code_point, B.code_point);
+    Render(PreprocessText(text, style), rect, style.color);
         }
-        else
-        {
-            ret.metrics.advance = ret.rect.w;
-        }
-        return ret;
-    });
 
-    Text preprocessed_text;
-    preprocessed_text.words.emplace_back();
-    for (auto glyph : glyphs) {
-        if (glyph.code_point == ' ')
+void TextRenderer::Render(const PreprocessedText& text, Renderer::Dimensions::ActualPixelsRectangle rect, Renderer::Color color)
         {
-            // add advance and glyph without adding width and start next word
-            preprocessed_text.words.back().advance += glyph.metrics.advance;
-            preprocessed_text.words.back().characters.emplace_back(std::move(glyph));
-            preprocessed_text.words.emplace_back();
-        }
-        else if (glyph.code_point < 256)
-        {
-            // add advance, width and glyph
-            preprocessed_text.words.back().width += glyph.metrics.advance;
-            preprocessed_text.words.back().advance += glyph.metrics.advance;
-            preprocessed_text.words.back().characters.emplace_back(std::move(glyph));
-        }
-        else
-        {
-            // finish word if non-zero length
-            if (preprocessed_text.words.back().characters.size())
-                preprocessed_text.words.emplace_back();
+    g_Renderer.DrawBox(rect, { 0.5f, 0.0f, 0.5f, 0.5f });
 
-            // add advance, width and glyph and start next word
-            preprocessed_text.words.back().width += glyph.metrics.advance;
-            preprocessed_text.words.back().advance += glyph.metrics.advance;
-            preprocessed_text.words.back().characters.emplace_back(std::move(glyph));
-            preprocessed_text.words.emplace_back();
-        }
-    }
+    auto max_lines = floor(static_cast<float>(rect.size.h) / text.line_height);
 
-    auto line_height = TTF_FontLineSkip(*fonts.begin());
-    auto max_lines = floor(static_cast<float>(rect.size.h) / line_height);
+    if (text.words.size() == 0)
+        return;
     
     auto glyph_position = rect.pos;
-    glyph_position.y += TTF_FontAscent(*fonts.begin());
+    glyph_position.y += TTF_FontAscent(text.words[0].characters[0].font);
 
     auto remaining_width = rect.size.w;
-    auto it = preprocessed_text.words.begin();
     auto line_count = 1;
-    while (it != preprocessed_text.words.end() && line_count <= max_lines)
+    for (auto it = text.words.begin(); it != text.words.end() && line_count <= max_lines; ++it)
     {
         if (it->width > remaining_width)
         {
             glyph_position.x = rect.pos.x;
-            glyph_position.y += line_height;
+            glyph_position.y += text.line_height;
             remaining_width = rect.size.w;
             ++line_count;
             continue;
@@ -135,13 +147,11 @@ void TextRenderer::Render(utf8string text, Renderer::Dimensions::ActualPixelsRec
 
         for (auto glyph : it->characters)
         {
-            g_Renderer.CopyTexture(glyph.texture, glyph.rect, { {glyph_position.x, glyph_position.y - glyph.metrics.ascent}, {glyph.rect.w, glyph.rect.h} }, style.color);
+            g_Renderer.CopyTexture(glyph.texture, glyph.rect, { {glyph_position.x, glyph_position.y - glyph.metrics.ascent}, {glyph.rect.w, glyph.rect.h} }, color);
             glyph_position.x += glyph.metrics.advance;
         }
 
         remaining_width -= it->advance;
-
-        ++it;
     }
 }
 
@@ -151,6 +161,26 @@ void TextRenderer::ClearAll()
 
     glyphs.clear();
     atlases.clear();
+}
+
+std::vector<Glyph> TextRenderer::transform_to_glyphs(std::u32string_view text, const std::vector<TTF_Font*>& fonts)
+{
+    std::vector<Glyph> glyphs;
+    std::transform(text.begin(), text.end(), std::back_inserter(glyphs), [&, this](char32_t code_point) {
+        if (code_point > std::numeric_limits<char16_t>::max())
+            code_point = 0xFFFD;
+
+        auto it = std::find_if(fonts.begin(), fonts.end(), [code_point](auto font) {
+            return TTF_GlyphIsProvided(font, static_cast<uint16_t>(code_point));
+        });
+        if (it == fonts.end())
+            --it; // just use the last font even if it's missing the glyph
+
+        auto font = *it;
+        return get_glyph(font, static_cast<uint16_t>(code_point));
+    });
+
+    return glyphs;
 }
 
 Glyph TextRenderer::get_glyph(TTF_Font* font, char16_t code_point)

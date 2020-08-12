@@ -37,9 +37,10 @@ struct Word
 	int advance;
 };
 
-struct Text
+struct PreprocessedText
 {
 	std::vector<Word> words;
+	int line_height;
 };
 
 namespace std
@@ -49,7 +50,7 @@ namespace std
 		std::size_t operator()(std::pair<const TTF_Font*, char16_t> const& s) const noexcept
 		{
 			auto ptr = reinterpret_cast<intptr_t>(s.first);
-			return ptr ^ (s.second << 48 | s.second << 32 | s.second << 16 | s.second);
+			return ptr ^ (static_cast<intptr_t>(s.second) << 48 | static_cast<intptr_t>(s.second) << 32 | static_cast<intptr_t>(s.second) << 16 | s.second);
 		}
 	};
 }
@@ -74,12 +75,14 @@ private:
 	};
 
 public:
+	PreprocessedText PreprocessText(utf8string text, TextStyle style);
 	void Render(utf8string text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style);
-	void Render(const Text& text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style);
+	void Render(const PreprocessedText& text, Renderer::Dimensions::ActualPixelsRectangle rect, Renderer::Color color);
 
 	void ClearAll();
 
 private:
+	std::vector<Glyph> transform_to_glyphs(std::u32string_view text, const std::vector<TTF_Font*>& fonts);
 	Glyph get_glyph(TTF_Font* font, char16_t code_point);
 	Glyph generate_glyph(TTF_Font* font, char16_t code_point);
 	Atlas& get_atlas(int height, int width);
