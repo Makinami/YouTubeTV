@@ -27,9 +27,16 @@ namespace YouTube::UI
 	public:
 		virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize = 0;
 
+		virtual ~BasicElement()
+		{
+			ctx.cancel();
+			loading_task.wait();
+		}
+
 	protected:
 		State state = State::Uninitialized;
 		pplx::task<void> loading_task;
+		pplx::cancellation_token_source ctx;
 	};
 
 	class MainMenu : public BasicElement

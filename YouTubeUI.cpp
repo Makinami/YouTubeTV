@@ -55,19 +55,34 @@ public:
 	Thumbnail(Thumbnail &&) = default;
 	Thumbnail &operator=(Thumbnail &&) = default;
 
-	Thumbnail(const web::json::object &data);
+	Thumbnail(const nlohmann::json& data);
+
+	~Thumbnail()
+	{
+		ctx.cancel();
+		loading_task.wait();
+	}
 
 	auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 
 private:
-	ImageManager::img_ptr thumbnail;
+	std::atomic<ImageManager::img_ptr> thumbnail;
 	ActualPixelsSize size;
+
+	pplx::task<void> loading_task;
+	pplx::cancellation_token_source ctx;
 };
 
 class HomeView : public BasicElement
 {
 public:
 	virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
+
+	virtual ~HomeView()
+	{
+		ctx.cancel();
+		loading_task.wait();
+	}
 
 private:
 	void Initialize();
@@ -78,7 +93,7 @@ private:
 class HomeTab : public BasicElement
 {
 public:
-	HomeTab(const web::json::object &data);
+	HomeTab(const nlohmann::json& data);
 
 	HomeTab() = default;
 	HomeTab(const HomeTab &) = delete;
@@ -101,7 +116,7 @@ private:
 class Shelf
 {
 public:
-	Shelf(const web::json::object &data);
+	Shelf(const nlohmann::json& data);
 
 	Shelf() = default;
 	Shelf(const Shelf &) = delete;
@@ -130,13 +145,13 @@ public:
 	};
 
 private:
-	static const std::unordered_map<utility::string_t, Type> type_mapping;
+	static const std::unordered_map<std::string, Type> type_mapping;
 
 protected:
-	MediaItem(const web::json::object &data);
+	MediaItem(const nlohmann::json& data);
 
 public:
-	static auto create(const web::json::object &data) -> std::unique_ptr<MediaItem>;
+	static auto create(const nlohmann::json& data)->std::unique_ptr<MediaItem>;
 
 	virtual auto display(ActualPixelsRectangle clipping, bool selected) -> ActualPixelsSize;
 
@@ -151,14 +166,14 @@ protected:
 	//std::variant<ImageManager::img_ptr, pplx::task<void>> thumbnail;
 };
 
-const std::unordered_map<utility::string_t, MediaItem::Type> MediaItem::type_mapping{
-	{U("tvMusicVideoRenderer"), Type::MusicVideo},
-	{U("gridVideoRenderer"), Type::Video}};
+const std::unordered_map<std::string, MediaItem::Type> MediaItem::type_mapping{
+	{"tvMusicVideoRenderer", Type::MusicVideo},
+	{"gridVideoRenderer", Type::Video}};
 
 class MusicVideo : public MediaItem
 {
 public:
-	MusicVideo(const web::json::object &data);
+	MusicVideo(const nlohmann::json& data);
 
 	//virtual auto display(ActualPixelsRectangle clipping)->ActualPixelsSize;
 
@@ -169,7 +184,7 @@ private:
 class Video : public MediaItem
 {
 public:
-	Video(const web::json::object &data);
+	Video(const nlohmann::json& data);
 
 	//virtual auto display(ActualPixelsRectangle clipping)->ActualPixelsSize;
 private:
@@ -191,6 +206,16 @@ auto build_text(const web::json::value &data) -> utility::string_t
 {
 	ASSERT(data.is_object(), "JSON value passed to text builder is not an object");
 	return build_text(data.as_object());
+}
+
+auto build_text(const nlohmann::json& data) -> std::string
+{
+	if (data.is_string()) return data.get<std::string>();
+	
+	return std::accumulate(data["runs"].begin(), data["runs"].end(), ""s, [](std::string prev, const nlohmann::json& part) {
+		ASSERT(part["text"].is_string());
+		return std::move(prev) + part["text"].get<std::string>();
+	});
 }
 
 YouTube::UI::Text::Text(utility::string_t text, Rem _font_size)
@@ -238,31 +263,46 @@ auto YouTube::UI::HomeView::display(ActualPixelsRectangle clipping) -> ActualPix
 
 void YouTube::UI::HomeView::Initialize()
 {
-	loading_task = g_API.get(U("default")).then([this](web::json::value data) {
-		auto tabs_data = data.at(U("contents")).at(U("tvBrowseRenderer")).at(U("content")).at(U("tvSecondaryNavRenderer")).at(U("sections")).as_array()[0].at(U("tvSecondaryNavSectionRenderer")).at(U("tabs")).as_array();
+	loading_task = g_API.get(U("default"), ctx.get_token()).then([this](nlohmann::json data) {
+		try {
+			const auto secondary_nav_renderer = data["contents"]["tvBrowseRenderer"]["content"]["tvSecondaryNavRenderer"];
+			const auto title = build_text(secondary_nav_renderer["title"]);
+			spdlog::info("Processing {} view", title);
+			const auto tabs_data = secondary_nav_renderer["sections"][0]["tvSecondaryNavSectionRenderer"]["tabs"];
 
 		for (const auto &tab_data : tabs_data)
 		{
-			tabs.emplace_back(tab_data.as_object());
+				tabs.emplace_back(tab_data);
 			break;
 		}
 
 		state = State::Loaded;
+			spdlog::info("{} view loaded", title);
+		}
+		catch (const web::json::json_exception& error)
+		{
+			spdlog::critical(error.what());
+		}
+		catch (...) {
+			spdlog::critical("Unknowns exception");
+		}
+
 	});
 	state = State::Loading;
 }
 
-YouTube::UI::HomeTab::HomeTab(const web::json::object &data)
+YouTube::UI::HomeTab::HomeTab(const nlohmann::json& data)
 {
-	ASSERT(data.begin()->first == U("tabRenderer"), "Home tab data is not defined by tabRenderer object");
-	title = utility::conversions::to_utf8string(data.at(U("tabRenderer")).at(U("title")).as_string());
+	ASSERT(data.contains("tabRenderer"), "Home tab data is not defined by tabRenderer object");
+	const auto tab_renderer = data["tabRenderer"];
+	title = build_text(tab_renderer["title"]);
 
-	auto sections_data = data.at(U("tabRenderer")).at(U("content")).at(U("tvSurfaceContentRenderer")).at(U("content")).at(U("sectionListRenderer")).at(U("contents")).as_array();
-
-	for (const auto &section_data : sections_data)
+	spdlog::info("Processing {} tab", title);
+	for (const auto& section_data : tab_renderer["content"]["tvSurfaceContentRenderer"]["content"]["sectionListRenderer"]["contents"])
 	{
-		shelfs.emplace_back(section_data.as_object());
+		shelfs.emplace_back(section_data);
 	}
+	spdlog::info("{} tab loaded", title);
 }
 
 auto YouTube::UI::HomeTab::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
@@ -310,17 +350,19 @@ YouTube::UI::MainMenu::MainMenu()
 	main_content = std::make_unique<HomeView>();
 }
 
-YouTube::UI::Shelf::Shelf(const web::json::object &data)
+YouTube::UI::Shelf::Shelf(const nlohmann::json& data)
 {
-	ASSERT(data.begin()->first == U("shelfRenderer"));
-	title = Text{build_text(data.at(U("shelfRenderer")).at(U("title"))), 1.5_rem};
+	ASSERT(data.contains("shelfRenderer"));
+	const auto& shelf_renderer = data["shelfRenderer"];
+	title = Text{ build_text(shelf_renderer["title"]), 1.5_rem };
 
-	auto items_data = data.at(U("shelfRenderer")).at(U("content")).at(U("horizontalListRenderer")).at(U("items")).as_array();
-	for (auto item_data : items_data)
+	spdlog::info("Processing {} shelf", title.str());
+	for (const auto& item_data : shelf_renderer["content"]["horizontalListRenderer"]["items"])
 	{
-		if (auto item = MediaItem::create(item_data.as_object()); item)
+		if (auto item = MediaItem::create(item_data); item)
 			items.push_back(std::move(item));
 	}
+	spdlog::info("{} shelf loaded", title.str());
 }
 
 auto YouTube::UI::Shelf::display(ActualPixelsRectangle clipping, bool selected) -> ActualPixelsSize
@@ -331,7 +373,7 @@ auto YouTube::UI::Shelf::display(ActualPixelsRectangle clipping, bool selected) 
 	clipping.pos.x += 3_rem;
 	clipping.pos.y += 0.125_rem /* half of line/font height diff */;
 
-	title.display(clipping);
+	title.display({ clipping.pos, {clipping.size.w, static_cast<int>(1.75_rem)} });
 
 	clipping.pos.y += 1.5_rem /* font height */ + 0.125_rem /* half of line/font height diff */ + 1_rem /* margin-top of media item */;
 
@@ -369,26 +411,34 @@ auto YouTube::UI::MainMenu::display(ActualPixelsRectangle clipping) -> ActualPix
 	return ActualPixelsSize();
 }
 
-YouTube::UI::MediaItem::MediaItem(const web::json::object &data)
-	: thumbnail{data.at(U("thumbnail")).as_object()}, video_id{utility::conversions::to_utf8string(data.at(U("navigationEndpoint")).at(U("watchEndpoint")).at(U("videoId")).as_string())}
+YouTube::UI::MediaItem::MediaItem(const nlohmann::json& data)
+	: thumbnail{ data["thumbnail"] }, video_id{ data["navigationEndpoint"]["watchEndpoint"]["videoId"].get<std::string>() }
 {
 }
 
-auto YouTube::UI::MediaItem::create(const web::json::object &data) -> std::unique_ptr<MediaItem>
+auto YouTube::UI::MediaItem::create(const nlohmann::json& data) -> std::unique_ptr<MediaItem>
 {
-	auto it = type_mapping.find(data.begin()->first);
+	auto it = type_mapping.find(data.begin().key());
 	if (it == type_mapping.end())
 	{
-		std::wcout << "Unsupported media item type: " << data.begin()->first << '\n';
+		spdlog::warn("Unsupported media item type: {}", data.begin().key());
 		return nullptr;
 	}
 
+	//spdlog::info("Processing {} - {} media item", build_text(data.begin().value()["title"]), data.begin().key());
+	try
+	{
 	switch (it->second)
 	{
 	case Type::MusicVideo:
-		return std::make_unique<MusicVideo>(data.at(U("tvMusicVideoRenderer")).as_object());
+				return std::make_unique<MusicVideo>(data["tvMusicVideoRenderer"]);
 	case Type::Video:
-		return std::make_unique<Video>(data.at(U("gridVideoRenderer")).as_object());
+				return std::make_unique<Video>(data["gridVideoRenderer"]);
+		}
+	}
+	catch (...)
+	{
+		spdlog::error("Failed to create the media item:\n{}", data.dump(2));
 	}
 
 	return nullptr;
@@ -432,38 +482,39 @@ bool YouTube::UI::MediaItem::keyboard_callback(SDL_KeyboardEvent event)
 	return false;
 }
 
-YouTube::UI::MusicVideo::MusicVideo(const web::json::object &data)
+YouTube::UI::MusicVideo::MusicVideo(const nlohmann::json& data)
 	: MediaItem(data)
 {
-	title = Text{build_text(data.at(U("primaryText"))), 1.5_rem};
+	title = Text{ build_text(data.at("primaryText")), 1.5_rem };
 
-	secondary = Text{build_text(data.at(U("secondaryText"))) + U('\n') + build_text(data.at(U("tertiaryText"))), 1_rem};
-	length_text = Text{build_text(data.at(U("lengthText"))), 0.875_rem};
+	secondary = Text{ build_text(data.at("secondaryText")) + '\n' + build_text(data.at("tertiaryText")), 1_rem };
+	length_text = Text{ build_text(data.at("lengthText")), 0.875_rem };
 }
 
-YouTube::UI::Video::Video(const web::json::object &data)
+YouTube::UI::Video::Video(const nlohmann::json& data)
 	: MediaItem(data)
 {
-	title = Text{build_text(data.at(U("title"))), 1.5_rem};
+	title = Text{ build_text(data.at("title")), 1.5_rem };
 
-	secondary = Text{build_text(data.at(U("shortBylineText"))) + U('\n') + build_text(data.at(U("shortViewCountText"))) + U(" � ") + build_text(data.at(U("publishedTimeText"))), 1_rem};
-	length_text = Text{build_text(data.at(U("lengthText"))), 0.875_rem};
+	secondary = Text{ build_text(data.at("shortBylineText")) + '\n' + build_text(data.at("shortViewCountText")) /*+ " � " + build_text(data.at("publishedTimeText"))*/, 1_rem };
+	length_text = Text{build_text(data.at("lengthText")), 0.875_rem};
 }
 
-YouTube::UI::Thumbnail::Thumbnail(const web::json::object &data)
+YouTube::UI::Thumbnail::Thumbnail(const nlohmann::json& data)
 {
-	auto thumbnails = data.at(U("thumbnails")).as_array();
-	auto it = std::lower_bound(thumbnails.begin(), thumbnails.end(), Vec2D<int>{475, 264} /* max size on FullHD */, [](const web::json::value &lhs, const Vec2D<int> &rhs) {
-		return lhs.at(U("height")).as_integer() < rhs.h || lhs.at(U("width")).as_integer() < rhs.w;
+	auto thumbnails = data["thumbnails"];
+	auto it = std::lower_bound(thumbnails.begin(), thumbnails.end(), Vec2D<int>{475, 264} /* max size on FullHD */, [](const nlohmann::json& lhs, const Vec2D<int>& rhs) {
+		return lhs["height"].get<int>() < rhs.h || lhs["width"].get<int>() < rhs.w;
 	});
 
 	if (it == thumbnails.end())
 		--it; // get heightest even if not good enough
 
-	size = ActualPixelsSize{it->at(U("width")).as_integer(), it->at(U("height")).as_integer()};
-	g_ImageManager.get_image(it->at(U("url")).as_string())
+	spdlog::info("Loading thumbnail: {}", url);
+	loading_task = g_ImageManager.get_image(utility::conversions::to_string_t(url), ctx.get_token())
 		.then([&](ImageManager::img_ptr image) {
 			thumbnail = image;
+			spdlog::info("Thumbnail {} loaded", url);
 		});
 }
 
