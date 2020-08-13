@@ -37,6 +37,8 @@ namespace YouTube
 
 	std::vector<std::function<bool(SDL_KeyboardEvent)>> g_KeyboardCallbacks;
 	std::unique_ptr<YouTubeVideo> g_PlayingVideo;
+
+	Renderer::RenderQueue g_RendererQueue;
 }
 
 void YouTube::Initialize()
