@@ -4,6 +4,7 @@
 #include <variant>
 #include <utility>
 #include <algorithm>
+#include <numeric>
 #include <mutex>
 #include <cpprest/json.h>
 
@@ -13,8 +14,10 @@
 #include "FontManager.h"
 #include "ImageManager.h"
 #include "YouTubeVideo.h"
+#include "TextRenderer.h"
 
 using namespace Renderer::Dimensions;
+using namespace std::string_literals;
 
 namespace YouTube::UI
 {
@@ -27,21 +30,28 @@ class Text
 public:
 	Text() = default;
 	Text(utility::string_t text, Rem _font_size);
+	Text(std::string text, Rem _font_size);
 	Text(const Text &) = delete;
 	Text &operator=(const Text &) = delete;
 	Text(Text &&other) noexcept = default;
 	Text &operator=(Text &&other) noexcept = default;
 
-	auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
+	auto display(ActualPixelsRectangle clipping, Renderer::Color colour = default_colour) -> ActualPixelsSize;
+	const auto& str() const { return text_str; }
 
 private:
 	void render();
+
+public:
+	static constexpr Renderer::Color default_colour = { 235, 235, 235 };
+	static constexpr Renderer::Color selected_colour = { 0x2f, 0x2f, 0x2f };
 
 private:
 	utf8string text_str;
 	Rem font_size{1};
 
 	std::shared_ptr<SDL_Texture> title_texture;
+	PreprocessedText preprocessed_text;
 	ActualPixelsSize size;
 	int current_font_size{-1};
 };
@@ -225,22 +235,29 @@ YouTube::UI::Text::Text(utility::string_t text, Rem _font_size)
 	render();
 }
 
-auto YouTube::UI::Text::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
+YouTube::UI::Text::Text(std::string text, Rem _font_size)
+	: font_size{ _font_size }, text_str{ std::move(text) }
+{
+	render();
+}
+
+auto YouTube::UI::Text::display(ActualPixelsRectangle clipping, Renderer::Color colour) -> ActualPixelsSize
 {
 	if (static_cast<int>(font_size) != current_font_size)
 		render();
 
-	auto dst = SDL_Rect{static_cast<int>(clipping.pos.x), static_cast<int>(clipping.pos.y), static_cast<int>(size.w), static_cast<int>(size.h)};
-	g_Renderer.CopyTexture(title_texture.get(), nullptr, &dst);
+	g_TextRenderer.Render(preprocessed_text, clipping, colour);
 
 	return ActualPixelsSize{0, current_font_size};
 }
 
 void YouTube::UI::Text::render()
 {
-	title_texture = g_Renderer.RenderTextToNewTexture(text_str, g_FontManager.get_font("Roboto-Regular.ttf", font_size), {235, 235, 235});
-	SDL_QueryTexture(title_texture.get(), nullptr, nullptr, &size.w, &size.h);
-	current_font_size = font_size;
+	preprocessed_text = g_TextRenderer.PreprocessText(text_str, {
+		.fonts = { "Arial Bold", "Yu Gothic Bold" },
+		.size = static_cast<int>(font_size)
+	});
+	current_font_size = static_cast<int>(font_size);
 }
 
 auto YouTube::UI::HomeView::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
@@ -436,9 +453,9 @@ auto YouTube::UI::MediaItem::create(const nlohmann::json& data) -> std::unique_p
 				return std::make_unique<Video>(data["gridVideoRenderer"]);
 		}
 	}
-	catch (...)
+	catch (const std::exception& exception)
 	{
-		spdlog::error("Failed to create the media item:\n{}", data.dump(2));
+		spdlog::error("Failed to create the media item:\nError: {}\n{}", exception.what(), data.dump(2));
 	}
 
 	return nullptr;
@@ -463,7 +480,7 @@ auto YouTube::UI::MediaItem::display(ActualPixelsRectangle clipping, bool select
 	if (selected)
 		g_Renderer.DrawBox(RemRectangle{ clipping.pos - RemSize{0.5, 0}, RemSize{22, 8.15 } }, { 235, 235, 235 });
 
-	title.display(clipping).y;
+	title.display({ clipping.pos, RemSize{21, 3.5} }, selected ? title.selected_colour : title.default_colour);
 	clipping.pos.y += 1.5_rem; /* title font size */
 	clipping.pos.y += 0.5_rem; /* title margin bottom */
 	secondary.display(clipping);

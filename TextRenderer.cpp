@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "TextRenderer.h"
 
 #include "YouTubeCore.h"
@@ -116,23 +116,23 @@ PreprocessedText TextRenderer::PreprocessText(utf8string text, TextStyle style)
 }
 
 void TextRenderer::Render(utf8string text, Renderer::Dimensions::ActualPixelsRectangle rect, TextStyle style)
-        {
+{
     Render(PreprocessText(text, style), rect, style.color);
-        }
+}
 
 void TextRenderer::Render(const PreprocessedText& text, Renderer::Dimensions::ActualPixelsRectangle rect, Renderer::Color color)
-        {
+{
     g_Renderer.DrawBox(rect, { 0.5f, 0.0f, 0.5f, 0.5f });
 
     auto max_lines = floor(static_cast<float>(rect.size.h) / text.line_height);
 
     if (text.words.size() == 0)
         return;
-    
+
     auto glyph_position = rect.pos;
     glyph_position.y += TTF_FontAscent(text.words[0].characters[0].font);
 
-    auto remaining_width = rect.size.w;
+    auto remaining_width = rect.size.w;    
     auto line_count = 1;
     for (auto it = text.words.begin(); it != text.words.end() && line_count <= max_lines; ++it)
     {
@@ -199,14 +199,16 @@ Glyph TextRenderer::generate_glyph(TTF_Font* font, char16_t code_point)
     auto& atlas = get_atlas(surface->h, surface->w);
 
     auto glyph_position = SDL_Rect{ atlas.used, 0, surface->w, surface->h };
-    g_Renderer.CopySurfaceToTexture(surface.get(), atlas.texture.get(), nullptr, &glyph_position);
+    g_RendererQueue.push([&](GuardedRenderer* g_Renderer) {
+        g_Renderer->CopySurfaceToTexture(surface.get(), atlas.texture.get(), nullptr, &glyph_position);
+    }).wait();
 
     atlas.used += surface->w;
 
     auto metrics = Glyph::Metrics{ .height = TTF_FontHeight(font), .ascent = TTF_FontAscent(font), .descent = TTF_FontDescent(font), .line_skip = TTF_FontLineSkip(font) };
     if (TTF_GlyphMetrics(font, code_point, &metrics.minx, &metrics.maxx, &metrics.miny, &metrics.maxy, &metrics.advance))
     {
-        std::cerr << "Font doesn't have codepoint\n";
+        spdlog::info("Font {} {} doesn't have codepoint {}", TTF_FontFaceFamilyName(font), TTF_FontFaceStyleName(font), static_cast<uint16_t>(code_point));
     }
 
     return glyphs.emplace(std::make_pair(font, code_point), Glyph{ atlas.texture.get(), glyph_position, metrics, font, code_point }).first->second;

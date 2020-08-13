@@ -3,7 +3,10 @@
 #include "FontManager.h"
 
 #include <algorithm>
+#include <numeric>
 #include <utf8.h>
+
+using namespace std::string_literals;
 
 void FontManager::Initialize()
 {
@@ -11,7 +14,7 @@ void FontManager::Initialize()
 	{
 		if (!exists(directory))
 		{
-			std::cout << directory << " does not exist. Skipping.\n";
+			spdlog::debug(L"FontManager: "s + directory.c_str() + L" does not exist. Skipping.");
 			continue;
 		}
 
@@ -27,7 +30,10 @@ void FontManager::Initialize()
 		}
 	}
 
-	std::cout << "Found fonts:\n";
-	for (auto& font : font_files)
-		std::cout << font.first << '\n';
+	spdlog::debug("FontManager: {} fonts found: {}", font_files.size(), std::accumulate(font_files.begin(), font_files.end(), ""s, [](std::string list, const auto& font) {
+		if (list.size())
+			return std::move(list) + ", " + font.first;
+		else
+			return font.first;
+	}));
 }
