@@ -7,7 +7,7 @@
 using namespace YouTube;
 using namespace std::string_literals;
 
-pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::get_image(const utility::string_t& url)
+ImageManager::img_task ImageManager::get_image(const utility::string_t& url)
 {
 	if (auto it = images.find(url); it != images.end())
 		return it->second;
@@ -18,7 +18,18 @@ pplx::task<std::shared_ptr<SDL_Texture>> ImageManager::get_image(const utility::
 	}
 }
 
-void ImageManager::load_image(const utility::string_t& url)
+ImageManager::img_task ImageManager::get_image(const utility::string_t& url, pplx::cancellation_token token)
+{
+	if (auto it = images.find(url); it != images.end())
+		return it->second;
+	else
+	{
+		load_image(url, token);
+		return get_image(url);
+	}
+}
+
+void ImageManager::load_image(const utility::string_t& url, pplx::cancellation_token token)
 {
 	auto [domain, uri] = parse_url(url);
 
@@ -31,7 +42,7 @@ void ImageManager::load_image(const utility::string_t& url)
 	images.insert({ url, get_client(domain).request(request).then([=](web::http::http_response response) {
 		return response.extract_vector();
 	}).then([=](const std::vector<unsigned char>& data) {
-		auto reader = SDL_RWFromConstMem(data.data(), data.size());
+		auto reader = SDL_RWFromConstMem(data.data(), static_cast<int>(data.size()));
 		return std::shared_ptr<SDL_Texture>(g_Renderer.LoadTexture(reader));
 	}) });
 }

@@ -6,45 +6,17 @@
 #include <cpprest/http_client.h>
 #include <nlohmann/json.hpp>
 
-using namespace std::string_literals;
+#include <spdlog/spdlog.h>
 
-inline std::string wstr_to_str(const std::wstring& str)
-{
-	return { str.begin(), str.end() };
-}
+using namespace std::string_literals;
 
 class YouTubeAPI
 {
 public:
-	auto get(utility::string_t browseId) -> pplx::task<web::json::value>
+	auto get(utility::string_t browseId, pplx::cancellation_token token = pplx::cancellation_token::none()) -> pplx::task<nlohmann::json>
 	{
-		return client.request(browse_request(browseId)).then([](web::http::http_response response) {
-			return response.extract_json();
-		});
-	}
-
-	auto get_home_data()
-	{
-		return pplx::task<std::optional<web::json::value>>([this]() -> std::optional<web::json::value> {
-			try {
-				//auto read = std::ifstream("dump.json");
-				//return web::json::value::parse(read);
-
-				auto data = client.request(home_request()).then([=](web::http::http_response response) {
-					if (response.status_code() >= 300)
-						throw std::runtime_error("Errow while retrieving home page data: "s + std::to_string(response.status_code()) + " - " + wstr_to_str(response.reason_phrase()));
-					return response.extract_json();
-				}).get();
-
-				auto file = std::ofstream("dump.json", std::ios_base::trunc);
-				data.serialize(file);
-
-				return data;
-			}
-			catch (const std::exception& err) {
-				std::cerr << err.what() << '\n';
-				return {};
-			}
+		return client.request(browse_request(browseId), token).then([](web::http::http_response response) {
+			return nlohmann::json::parse(response.extract_utf8string().get());
 		});
 	}
 

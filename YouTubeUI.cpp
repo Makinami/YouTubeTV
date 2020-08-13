@@ -90,7 +90,7 @@ private:
 	std::vector<HomeTab> tabs;
 };
 
-class HomeTab : public BasicElement
+class HomeTab
 {
 public:
 	HomeTab(const nlohmann::json& data);
@@ -510,6 +510,8 @@ YouTube::UI::Thumbnail::Thumbnail(const nlohmann::json& data)
 	if (it == thumbnails.end())
 		--it; // get heightest even if not good enough
 
+	size = ActualPixelsSize{ it.value()["width"].get<int>(), it.value()["height"].get<int>() };
+	auto url = it.value()["url"].get<std::string>();
 	spdlog::info("Loading thumbnail: {}", url);
 	loading_task = g_ImageManager.get_image(utility::conversions::to_string_t(url), ctx.get_token())
 		.then([&](ImageManager::img_ptr image) {

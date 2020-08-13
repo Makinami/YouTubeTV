@@ -39,7 +39,7 @@ namespace YouTube::UI
 		pplx::cancellation_token_source ctx;
 	};
 
-	class MainMenu : public BasicElement
+	class MainMenu
 	{
 	public:
 		MainMenu();

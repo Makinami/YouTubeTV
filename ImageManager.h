@@ -31,7 +31,8 @@ public:
 
 public:
 	img_task get_image(const utility::string_t& url);
-	void load_image(const utility::string_t& url);
+	img_task get_image(const utility::string_t& url, pplx::cancellation_token token);
+	void load_image(const utility::string_t& url, pplx::cancellation_token token = pplx::cancellation_token::none());
 
 private:
 	std::pair<utility::string_t, utility::string_t> parse_url(const utility::string_t& url);

@@ -8,6 +8,10 @@
 
 #include <cpprest/details/basic_types.h>
 
+#define SPDLOG_WCHAR_TO_UTF8_SUPPORT
+#include <spdlog/spdlog.h>
+
+
 #include "Deleters.h"
 
 template <typename Arg>
