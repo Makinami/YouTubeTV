@@ -4,6 +4,10 @@
 #include <mutex>
 #include <algorithm>
 #include <limits>
+#include <any>
+#include <future>
+#include <queue>
+#include <functional>
 
 #include <cpprest/details/basic_types.h>
 
@@ -299,4 +303,74 @@ inline SDL_Rect calculate_projection_rect(int dst_width, int dst_height,
 inline SDL_Rect calculate_projection_rect(Renderer::Dimensions::ActualPixelsSize dst, Renderer::Dimensions::ActualPixelsSize src)
 {
 	return calculate_projection_rect(dst.w, dst.h, src.w, src.h);
+}
+
+namespace Renderer {
+	class RenderQueue
+	{
+	public:
+		enum class priority { low, medium, high, critical, levels_num };
+	private:
+		using task_t = std::packaged_task<std::any(GuardedRenderer*)>;
+		using item_t = std::pair<priority, task_t>;
+
+	public:
+		template <typename T>
+		auto push(T Func, priority level = priority::medium) -> std::future<decltype(Func(std::declval<GuardedRenderer*>()))>
+		{
+			using return_t = decltype(Func(std::declval<GuardedRenderer*>()));
+
+			task_t task;
+			if constexpr (std::is_void_v<return_t>)
+				task = task_t{ [=](GuardedRenderer* renderer) { Func(renderer); return 0; } };
+			else
+				task = task_t{ Func };
+
+			auto fut = task.get_future();
+			{
+				std::lock_guard lock{ mtx };
+				queue.push(item_t{ level, std::move(task) });
+				++tasks_count;
+			}
+
+			return std::async([fut = std::move(fut)]() {
+				if constexpr (std::is_void_v<return_t>)
+				{
+					fut.wait();
+					return;
+				}
+				else
+				{
+					return std::any_cast<decltype(Func(std::declval<GuardedRenderer*>()))>(fut.get());
+				}
+			});
+		}
+
+		void execute_one(GuardedRenderer& renderer)
+		{
+			if (tasks_count == 0) return;
+
+			task_t task;
+			{
+				std::lock_guard lock{ mtx };
+				task = { std::move(const_cast<task_t&>(queue.top().second)) };
+				queue.pop();
+				--tasks_count;
+			}
+
+			task(&renderer);
+		}
+
+	private:
+		mutable std::mutex mtx;
+		std::atomic_int tasks_count;
+		struct Compare
+		{
+			bool operator()(const item_t& a, const item_t& b)
+			{
+				return a.first < b.first;
+			}
+		};
+		std::priority_queue<item_t, std::vector<item_t>, Compare> queue;
+	};
 }

@@ -1,6 +1,9 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "YouTubeCore.h"
+
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/basic_file_sink.h>
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
@@ -10,8 +13,6 @@
 #define USERAGENT "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.0 Safari/537.36 Edg/81.0.416.3"
 
 #include <cpprest/http_client.h>
-
-#include <nlohmann/json.hpp>
 
 #if defined(_WIN32) || defined(_WIN64)
 #define NOMINMAX
@@ -37,39 +38,26 @@ using namespace YouTube;
 
 int main(int argc, char *argv[])
 {
-	//pplx::cancellation_token_source ctx;
-
-	//auto task = pplx::task<void>([] {
-	//	std::cout << "one\n";
-	//}, ctx.get_token()).then([&] {
-	//	std::cout << "two\n";
-	//	ctx.cancel();
-	//}).then([] {
-	//	std::cout << "three\n";
-	//});
-
-	////ctx.cancel();
-
-	//task.wait();
-
-	//return 0;
+	{
+		std::vector<spdlog::sink_ptr> sinks;
+		sinks.emplace_back([]() {
+			auto sink = std::make_unique<spdlog::sinks::stdout_color_sink_mt>();
+			sink->set_level(spdlog::level::info);
+			return sink;
+		}());
+		sinks.emplace_back([]() {
+			auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>("logs/last_run.log", true);
+			sink->set_level(spdlog::level::trace);
+			return sink;
+		}());
+		auto logger = std::make_unique<spdlog::logger>("", std::begin(sinks), std::end(sinks));
+		spdlog::set_default_logger(std::move(logger));
+		spdlog::set_level(spdlog::level::trace);
+	}
 
 	YouTube::YouTubeCoreRAII yt_core;
 
-	//YouTube::UI::MainMenu main_menu;
-
-	using Renderer::Dimensions::operator""_rem;
-
-	auto text = utility::conversions::to_utf8string(U("Evangelion 1.11 Ramiel【ラミエル】 Full HD"));
-
-	auto test = utility::conversions::to_utf8string(U("日本😁語"));
-	std::cout << test.size();
-
-	TextStyle style;
-	style.size = 1.5_rem;
-	style.fonts = { "Arial Bold", "Yu Gothic Bold" };
-	style.color = { 234, 234, 234 };
-	Renderer::Dimensions::RemRectangle rect = { {20, 20},{21, 3.5} };
+	YouTube::UI::MainMenu main_menu;
 
 	SDL_Event event;
 	while (true)
@@ -106,35 +94,34 @@ int main(int argc, char *argv[])
 
 		g_KeyboardCallbacks.clear();
 
+		g_RendererQueue.execute_one(g_Renderer);
+
 		g_Renderer.Clear();
 
-		g_TextRenderer.Render(text, rect, style);
+		if (g_PlayingVideo)
+		{
+			g_KeyboardCallbacks.emplace_back([](SDL_KeyboardEvent event) {
+				if (event.keysym.sym == SDLK_ESCAPE)
+				{
+					g_PlayingVideo = nullptr;
+					return true;
+				}
+				return false;
+			});
 
-		//if (g_PlayingVideo)
-		//{
-		//	g_KeyboardCallbacks.emplace_back([](SDL_KeyboardEvent event) {
-		//		if (event.keysym.sym == SDLK_ESCAPE)
-		//		{
-		//			g_PlayingVideo = nullptr;
-		//			return true;
-		//		}
-		//		return false;
-		//	});
-
-		//	// display video here
-		//	auto [flc, frame_ptr] = g_PlayingVideo->get_video_frame();
-		//	auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
-		//	auto [width, height, sar] = g_PlayingVideo->get_video_size();
-		//	int wnd_width, wnd_height;
-		//	auto rect = calculate_projection_rect(g_Renderer.GetSize().actual_width, g_Renderer.GetSize().actual_height, width, height);
-		//	SDL_RenderCopy(renderer_ptr, frame_ptr, nullptr, &rect);
-		//	flc.unlock();
-		//}
-		//else
-		//{
-		//	auto dim = g_Renderer.GetSize();
-		//	main_menu.display({{0, 0}, {dim.actual_width, dim.actual_height}});
-		//}
+			// display video here
+			auto [flc, frame_ptr] = g_PlayingVideo->get_video_frame();
+			auto [rlc, renderer_ptr] = g_Renderer.get_renderer();
+			auto [width, height, sar] = g_PlayingVideo->get_video_size();
+			auto rect = calculate_projection_rect(g_Renderer.GetSize().actual_width, g_Renderer.GetSize().actual_height, width, height);
+			SDL_RenderCopy(renderer_ptr, frame_ptr, nullptr, &rect);
+			flc.unlock();
+		}
+		else
+		{
+			auto dim = g_Renderer.GetSize();
+			main_menu.display({{0, 0}, {dim.actual_width, dim.actual_height}});
+		}
 		g_Renderer.Present();
 	}
 

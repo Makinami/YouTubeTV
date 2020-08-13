@@ -14,6 +14,10 @@ class FontManager;
 class YouTubeVideo;
 class TextRenderer;
 
+namespace Renderer {
+	class RenderQueue;
+}
+
 namespace YouTube
 {
 	using namespace std;
@@ -26,6 +30,8 @@ namespace YouTube
 	extern YouTubeAPI g_API;
 	extern FontManager g_FontManager;
 	extern TextRenderer g_TextRenderer;
+
+	extern Renderer::RenderQueue g_RendererQueue;
 
 	extern std::vector<std::function<bool(SDL_KeyboardEvent)>> g_KeyboardCallbacks;
 	extern std::unique_ptr<YouTubeVideo> g_PlayingVideo;
