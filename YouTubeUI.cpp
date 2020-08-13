@@ -76,7 +76,7 @@ public:
 	auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 
 private:
-	std::atomic<ImageManager::img_ptr> thumbnail;
+	ImageManager::img_ptr thumbnail;
 	ActualPixelsSize size;
 
 	pplx::task<void> loading_task;
@@ -221,7 +221,7 @@ auto build_text(const web::json::value &data) -> utility::string_t
 auto build_text(const nlohmann::json& data) -> std::string
 {
 	if (data.is_string()) return data.get<std::string>();
-	
+
 	return std::accumulate(data["runs"].begin(), data["runs"].end(), ""s, [](std::string prev, const nlohmann::json& part) {
 		ASSERT(part["text"].is_string());
 		return std::move(prev) + part["text"].get<std::string>();
@@ -271,7 +271,8 @@ auto YouTube::UI::HomeView::display(ActualPixelsRectangle clipping) -> ActualPix
 		/* display placeholder */
 		break;
 	case YouTube::UI::BasicElement::State::Loaded:
-		tabs[0].display(clipping);
+		for (auto& tab : tabs)
+			tab.display(clipping);
 		break;
 	}
 
@@ -287,13 +288,13 @@ void YouTube::UI::HomeView::Initialize()
 			spdlog::info("Processing {} view", title);
 			const auto tabs_data = secondary_nav_renderer["sections"][0]["tvSecondaryNavSectionRenderer"]["tabs"];
 
-		for (const auto &tab_data : tabs_data)
-		{
+			for (const auto &tab_data : tabs_data)
+			{
 				tabs.emplace_back(tab_data);
-			break;
-		}
+				break;
+			}
 
-		state = State::Loaded;
+			state = State::Loaded;
 			spdlog::info("{} view loaded", title);
 		}
 		catch (const web::json::json_exception& error)
@@ -445,11 +446,11 @@ auto YouTube::UI::MediaItem::create(const nlohmann::json& data) -> std::unique_p
 	//spdlog::info("Processing {} - {} media item", build_text(data.begin().value()["title"]), data.begin().key());
 	try
 	{
-	switch (it->second)
-	{
-	case Type::MusicVideo:
+		switch (it->second)
+		{
+			case Type::MusicVideo:
 				return std::make_unique<MusicVideo>(data["tvMusicVideoRenderer"]);
-	case Type::Video:
+			case Type::Video:
 				return std::make_unique<Video>(data["gridVideoRenderer"]);
 		}
 	}
