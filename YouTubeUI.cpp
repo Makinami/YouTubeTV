@@ -29,8 +29,8 @@ class Text
 {
 public:
 	Text() = default;
-	Text(utility::string_t text, Rem _font_size);
-	Text(std::string text, Rem _font_size);
+	Text(utility::string_t text, TextStyle _font_style);
+	Text(std::string text, TextStyle _font_style);
 	Text(const Text &) = delete;
 	Text &operator=(const Text &) = delete;
 	Text(Text &&other) noexcept = default;
@@ -48,7 +48,7 @@ public:
 
 private:
 	utf8string text_str;
-	Rem font_size{1};
+	TextStyle font_style;
 
 	std::shared_ptr<SDL_Texture> title_texture;
 	PreprocessedText preprocessed_text;
@@ -228,36 +228,33 @@ auto build_text(const nlohmann::json& data) -> std::string
 	});
 }
 
-YouTube::UI::Text::Text(utility::string_t text, Rem _font_size)
-	: font_size{_font_size}
+YouTube::UI::Text::Text(utility::string_t text, TextStyle _font_style)
+	: font_style{_font_style}
 {
 	text_str = utility::conversions::to_utf8string(std::move(text));
 	render();
 }
 
-YouTube::UI::Text::Text(std::string text, Rem _font_size)
-	: font_size{ _font_size }, text_str{ std::move(text) }
+YouTube::UI::Text::Text(std::string text, TextStyle _font_style)
+	: font_style{ _font_style }, text_str{ std::move(text) }
 {
 	render();
 }
 
 auto YouTube::UI::Text::display(ActualPixelsRectangle clipping, Renderer::Color colour) -> ActualPixelsSize
 {
-	if (static_cast<int>(font_size) != current_font_size)
+	if (static_cast<int>(font_style.size) != current_font_size)
 		render();
 
 	g_TextRenderer.Render(preprocessed_text, clipping, colour);
 
-	return ActualPixelsSize{0, current_font_size};
+	return clipping.size;
 }
 
 void YouTube::UI::Text::render()
 {
-	preprocessed_text = g_TextRenderer.PreprocessText(text_str, {
-		.fonts = { "Arial Bold", "Yu Gothic Bold" },
-		.size = static_cast<int>(font_size)
-	});
-	current_font_size = static_cast<int>(font_size);
+	preprocessed_text = g_TextRenderer.PreprocessText(text_str, font_style);
+	current_font_size = static_cast<int>(font_style.size);
 }
 
 auto YouTube::UI::HomeView::display(ActualPixelsRectangle clipping) -> ActualPixelsSize
@@ -372,7 +369,10 @@ YouTube::UI::Shelf::Shelf(const nlohmann::json& data)
 {
 	ASSERT(data.contains("shelfRenderer"));
 	const auto& shelf_renderer = data["shelfRenderer"];
-	title = Text{ build_text(shelf_renderer["title"]), 1.5_rem };
+	title = Text{ build_text(shelf_renderer["title"]), {
+		.fonts = { /*"Roboto Regular",*/ "Arial Regular", "Meiryo Regular" },
+		.size = static_cast<int>(1.5_rem)
+	} };
 
 	spdlog::info("Processing {} shelf", title.str());
 	for (const auto& item_data : shelf_renderer["content"]["horizontalListRenderer"]["items"])
@@ -481,10 +481,9 @@ auto YouTube::UI::MediaItem::display(ActualPixelsRectangle clipping, bool select
 	if (selected)
 		g_Renderer.DrawBox(RemRectangle{ clipping.pos - RemSize{0.5, 0}, RemSize{22, 8.15 } }, { 235, 235, 235 });
 
-	title.display({ clipping.pos, RemSize{21, 3.5} }, selected ? title.selected_colour : title.default_colour);
-	clipping.pos.y += 1.5_rem; /* title font size */
+	clipping.pos.y += title.display({ clipping.pos, RemSize{21, 3.5} }, selected ? title.selected_colour : title.default_colour).y;
 	clipping.pos.y += 0.5_rem; /* title margin bottom */
-	secondary.display(clipping);
+	secondary.display({ clipping.pos, RemSize{21, 1.25} });
 
 	return ActualPixelsSize();
 }
@@ -503,19 +502,37 @@ bool YouTube::UI::MediaItem::keyboard_callback(SDL_KeyboardEvent event)
 YouTube::UI::MusicVideo::MusicVideo(const nlohmann::json& data)
 	: MediaItem(data)
 {
-	title = Text{ build_text(data.at("primaryText")), 1.5_rem };
+	title = Text{ build_text(data.at("primaryText")), {
+		.fonts = { "Roboto Bold", "Arial Bold", "Meiryo Bold", "Roboto Regular", "Arial Regular", "Meiryo Regular" },
+		.size = static_cast<int>(1.5_rem)
+	} };
 
-	secondary = Text{ build_text(data.at("secondaryText")) + '\n' + build_text(data.at("tertiaryText")), 1_rem };
-	length_text = Text{ build_text(data.at("lengthText")), 0.875_rem };
+	secondary = Text{ build_text(data.at("secondaryText")) + " • " + build_text(data.at("tertiaryText")), {
+		.fonts = { "Roboto Regular", "Arial Regular", "Meiryo Regular" },
+		.size = static_cast<int>(1_rem)
+	} };
+	length_text = Text{ build_text(data.at("lengthText")), {
+		.fonts = { "Roboto Bold", "Arial Bold", "Meiryo Bold", "Roboto Regular", "Arial Regular", "Meiryo Regular" },
+		.size = static_cast<int>(0.875_rem)
+	} };
 }
 
 YouTube::UI::Video::Video(const nlohmann::json& data)
 	: MediaItem(data)
 {
-	title = Text{ build_text(data.at("title")), 1.5_rem };
+	title = Text{ build_text(data.at("title")), {
+		.fonts = { "Roboto Bold", "Arial Bold", "Meiryo Bold", "Roboto Regular", "Arial Regular", "Meiryo Regular" },
+		.size = static_cast<int>(1.5_rem)
+	} };
 
-	secondary = Text{ build_text(data.at("shortBylineText")) + '\n' + build_text(data.at("shortViewCountText")) /*+ " � " + build_text(data.at("publishedTimeText"))*/, 1_rem };
-	length_text = Text{build_text(data.at("lengthText")), 0.875_rem};
+	secondary = Text{ build_text(data.at("shortBylineText")) + " • " + build_text(data.at("shortViewCountText")) /*+ " • " + build_text(data.at("publishedTimeText"))*/, {
+		.fonts = { "Roboto Regular", "Arial Regular", "Meiryo Regular" },
+		.size = static_cast<int>(1_rem)
+	} };
+	length_text = Text{ build_text(data.at("lengthText")), {
+		.fonts = { "Roboto Bold", "Arial Bold", "Meiryo Bold", "Roboto Regular", "Arial Regular", "Meiryo Regular" },
+		.size = static_cast<int>(0.875_rem)
+	} };
 }
 
 YouTube::UI::Thumbnail::Thumbnail(const nlohmann::json& data)
