@@ -30,7 +30,7 @@ namespace YouTube::UI
 		virtual ~BasicElement()
 		{
 			ctx.cancel();
-			loading_task.wait();
+			if (loading_task != pplx::task<void>{}) loading_task.wait();
 		}
 
 	protected:

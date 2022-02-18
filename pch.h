@@ -9,6 +9,7 @@
 #include <cpprest/details/basic_types.h>
 
 #define SPDLOG_WCHAR_TO_UTF8_SUPPORT
+#define SPDLOG_FMT_EXTERNAL
 #include <spdlog/spdlog.h>
 
 

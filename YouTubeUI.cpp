@@ -98,29 +98,53 @@ private:
 	void Initialize();
 
 	std::vector<HomeTab> tabs;
+	mutable std::mutex tabs_list_mtx;
 };
 
-class HomeTab
+class HomeTab : public BasicElement
 {
 public:
 	HomeTab(const nlohmann::json& data);
 
 	HomeTab() = default;
-	HomeTab(const HomeTab &) = delete;
-	HomeTab &operator=(const HomeTab &) = delete;
-	HomeTab(HomeTab &&) = default;
-	HomeTab &operator=(HomeTab &&) = default;
+	HomeTab(const HomeTab& other) = delete;
+	HomeTab& operator=(const HomeTab& other) = delete;
+	HomeTab(HomeTab&& other) noexcept
+		: HomeTab()
+	{
+		swap(*this, other);
+	}
+	HomeTab& operator=(HomeTab&& other) noexcept
+	{
+		swap(*this, other);
+		return *this;
+	}
 
 	virtual auto display(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 	auto display_top_navigation(ActualPixelsRectangle clipping) -> ActualPixelsSize;
 
 	bool keyboard_callback(SDL_KeyboardEvent event);
 
+	friend void swap(HomeTab& first, HomeTab& second)
+	{
+		std::scoped_lock lock{ first.shelfs_list_mtx, second.shelfs_list_mtx };
+		swap(first.ctx, second.ctx);
+		swap(first.loading_task, second.loading_task);
+		swap(first.title, second.title);
+		swap(first.shelfs, second.shelfs);
+		swap(first.selected_shelf, second.selected_shelf);
+		swap(first.continuation_payload, second.continuation_payload);
+	}
+
 private:
+	void load_more_shelfs();
+
 	utf8string title;
 	std::vector<Shelf> shelfs;
+	mutable std::mutex shelfs_list_mtx;
+	std::string continuation_payload;
 
-	int selected_shelf = 1;
+	int selected_shelf = 0;
 };
 
 class Shelf
@@ -131,18 +155,37 @@ public:
 	Shelf() = default;
 	Shelf(const Shelf &) = delete;
 	Shelf &operator=(const Shelf &) = delete;
-	Shelf(Shelf &&) = default;
-	Shelf &operator=(Shelf &&) = default;
+	Shelf(Shelf&& other)
+		: Shelf()
+	{
+		swap(*this, other);
+	}
+	Shelf& operator=(Shelf&& other)
+	{
+		swap(*this, other);
+		return *this;
+	}
 
 	virtual auto display(ActualPixelsRectangle clipping, bool selected) -> ActualPixelsSize;
 
 	bool keyboard_callback(SDL_KeyboardEvent event);
 
+	friend void swap(Shelf& first, Shelf& second)
+	{
+		std::scoped_lock lock{ first.items_list_mtx, second.items_list_mtx };
+		swap(first.title, second.title);
+		swap(first.items, second.items);
+		swap(first.selected_item, second.selected_item);
+	}
+
+	auto size() const { return items.size(); }
+
 private:
 	Text title;
 	std::vector<std::unique_ptr<MediaItem>> items;
+	mutable std::mutex items_list_mtx;
 
-	int selected_item = 1;
+	int selected_item = 0;
 };
 
 class MediaItem
@@ -268,6 +311,7 @@ auto YouTube::UI::HomeView::display(ActualPixelsRectangle clipping) -> ActualPix
 		/* display placeholder */
 		break;
 	case YouTube::UI::BasicElement::State::Loaded:
+		std::lock_guard lock{ tabs_list_mtx };
 		for (auto& tab : tabs)
 			tab.display(clipping);
 		break;
@@ -279,6 +323,7 @@ auto YouTube::UI::HomeView::display(ActualPixelsRectangle clipping) -> ActualPix
 void YouTube::UI::HomeView::Initialize()
 {
 	loading_task = g_API.get(U("default"), ctx.get_token()).then([this](nlohmann::json data) {
+		spdlog::trace("Home view data:\n{}", data.dump(2));
 		try {
 			const auto secondary_nav_renderer = data["contents"]["tvBrowseRenderer"]["content"]["tvSecondaryNavRenderer"];
 			const auto title = build_text(secondary_nav_renderer["title"]);
@@ -287,7 +332,9 @@ void YouTube::UI::HomeView::Initialize()
 
 			for (const auto &tab_data : tabs_data)
 			{
-				tabs.emplace_back(tab_data);
+				auto tab = HomeTab{ tab_data };
+				std::lock_guard lock{ tabs_list_mtx };
+				tabs.emplace_back(std::move(tab));
 				break;
 			}
 
@@ -303,7 +350,7 @@ void YouTube::UI::HomeView::Initialize()
 		}
 
 	});
-	state = State::Loading;
+	state = State::Loaded;
 }
 
 YouTube::UI::HomeTab::HomeTab(const nlohmann::json& data)
@@ -312,11 +359,15 @@ YouTube::UI::HomeTab::HomeTab(const nlohmann::json& data)
 	const auto tab_renderer = data["tabRenderer"];
 	title = build_text(tab_renderer["title"]);
 
+	Shelf shelf;
+	shelf = Shelf{};
+
 	spdlog::info("Processing {} tab", title);
 	for (const auto& section_data : tab_renderer["content"]["tvSurfaceContentRenderer"]["content"]["sectionListRenderer"]["contents"])
 	{
 		shelfs.emplace_back(section_data);
 	}
+	continuation_payload = tab_renderer["content"]["tvSurfaceContentRenderer"]["content"]["sectionListRenderer"]["continuations"][0]["nextContinuationData"]["continuation"];
 	spdlog::info("{} tab loaded", title);
 }
 
@@ -328,10 +379,16 @@ auto YouTube::UI::HomeTab::display(ActualPixelsRectangle clipping) -> ActualPixe
 
 	clipping.pos.y += display_top_navigation(clipping).h;
 
+	std::lock_guard lock{ shelfs_list_mtx };
 	for (int i = selected_shelf; i < shelfs.size(); ++i)
 	{
 		auto& shelf = shelfs[i];
 		clipping.pos.y += shelf.display(clipping, i == selected_shelf).h;
+	}
+
+	if (selected_shelf >= shelfs.size() - 2 && (loading_task == decltype(loading_task){} || loading_task.is_done()))
+	{
+		load_more_shelfs();
 	}
 
 	return ActualPixelsSize();
@@ -360,6 +417,30 @@ bool YouTube::UI::HomeTab::keyboard_callback(SDL_KeyboardEvent event)
 	return false;
 }
 
+void YouTube::UI::HomeTab::load_more_shelfs()
+{
+	if (continuation_payload == "") return;
+
+	ctx = {};
+	loading_task = g_API.get_continuation(utility::conversions::to_string_t(continuation_payload), ctx.get_token()).then([this](nlohmann::json data) {
+		spdlog::trace("Continuation data:\n{}", data.dump(2));
+		for (const auto& section_data : data["continuationContents"]["sectionListContinuation"]["contents"])
+		{
+			auto shelf = Shelf{ section_data };
+			if (shelf.size())
+			{
+				std::lock_guard lock{ shelfs_list_mtx };
+				shelfs.emplace_back(std::move(shelf));
+			}
+		}
+		//TODO: Better JSON handling
+		if (data["continuationContents"].contains("sectionListContinuation") && !data["continuationContents"]["sectionListContinuation"]["continuations"].empty())
+			continuation_payload = data["continuationContents"]["sectionListContinuation"]["continuations"][0]["nextContinuationData"]["continuation"];
+		else
+			continuation_payload = "";
+	});
+}
+
 YouTube::UI::MainMenu::MainMenu()
 {
 	main_content = std::make_unique<HomeView>();
@@ -369,7 +450,7 @@ YouTube::UI::Shelf::Shelf(const nlohmann::json& data)
 {
 	ASSERT(data.contains("shelfRenderer"));
 	const auto& shelf_renderer = data["shelfRenderer"];
-	title = Text{ build_text(shelf_renderer["title"]), {
+	title = Text{ build_text(shelf_renderer["headerRenderer"]["shelfHeaderRenderer"]["title"]), {
 		.fonts = { /*"Roboto Regular",*/ "Arial Regular", "Meiryo Regular" },
 		.size = static_cast<int>(1.5_rem)
 	} };
@@ -378,7 +459,10 @@ YouTube::UI::Shelf::Shelf(const nlohmann::json& data)
 	for (const auto& item_data : shelf_renderer["content"]["horizontalListRenderer"]["items"])
 	{
 		if (auto item = MediaItem::create(item_data); item)
+		{
+			std::lock_guard lock{ items_list_mtx };
 			items.push_back(std::move(item));
+		}
 	}
 	spdlog::info("{} shelf loaded", title.str());
 }
@@ -395,6 +479,7 @@ auto YouTube::UI::Shelf::display(ActualPixelsRectangle clipping, bool selected) 
 
 	clipping.pos.y += 1.5_rem /* font height */ + 0.125_rem /* half of line/font height diff */ + 1_rem /* margin-top of media item */;
 
+	std::lock_guard lock{ items_list_mtx };
 	for (int i = std::max(selected_item - 1, 0); i < items.size(); ++i)
 	{
 		auto& item = items[i];
@@ -549,7 +634,8 @@ YouTube::UI::Thumbnail::Thumbnail(const nlohmann::json& data)
 	auto url = it.value()["url"].get<std::string>();
 	spdlog::info("Loading thumbnail: {}", url);
 	loading_task = g_ImageManager.get_image(utility::conversions::to_string_t(url), ctx.get_token())
-		.then([&](ImageManager::img_ptr image) {
+		.then([&, url](ImageManager::img_ptr image) {
+			//TODO: Check if image was loaded correctly and display a placeholder if not
 			thumbnail = image;
 			spdlog::info("Thumbnail {} loaded", url);
 		});

@@ -1,0 +1,32 @@
+{
+  "name": "youtube-tv",
+  "version-string": "0.0.1",
+  "dependencies": [
+    "cpprestsdk",
+    "nlohmann-json",
+    {
+      "name": "spdlog",
+      "features": [ "wchar" ]
+    },
+    {
+        "name": "ffmpeg",
+        "features": [ "avformat" ]
+    },
+    {
+        "name": "sdl2"
+    },
+    {
+        "name": "sdl2-ttf"
+    },
+    {
+        "name": "sdl2-image",
+        "features": [ "libjpeg-turbo", "libwebp" ]
+    },
+    {
+        "name": "sdl2-gfx"
+    },
+    {
+        "name": "utfcpp"
+    }
+  ]
+}

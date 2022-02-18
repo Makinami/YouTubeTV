@@ -20,6 +20,13 @@ public:
 		});
 	}
 
+	auto get_continuation(utility::string_t continuation, pplx::cancellation_token token = pplx::cancellation_token::none()) -> pplx::task<nlohmann::json>
+	{
+		return client.request(continuation_request(continuation), token).then([](web::http::http_response response) {
+			return nlohmann::json::parse(response.extract_utf8string().get());
+		});
+	}
+
 private:
 	auto browser_request() -> web::http::http_request
 	{
@@ -37,6 +44,18 @@ private:
 			{ U("context"), context_json() },
 			{ U("browseId"), web::json::value(browseId) }
 		}));
+		return request;
+	}
+
+	auto continuation_request(utility::string_t continuation) -> web::http::http_request
+	{
+		auto request = browser_request();
+		request.set_request_uri(U("/youtubei/v1/browse?key=AIzaSyDCU8hByM-4DrUqRUYnGn-3llEO78bcxq8"));
+		request.set_method(web::http::methods::POST);
+		request.set_body(web::json::value::object({
+			{ U("context"), context_json() },
+			{ U("continuation"), web::json::value(continuation) }
+			}));
 		return request;
 	}
 

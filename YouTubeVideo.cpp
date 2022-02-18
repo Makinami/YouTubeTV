@@ -78,7 +78,7 @@ void VideoStream::start()
 					auto flags = 0;
 					if (new_dts < working_frame->pts)
 						flags |= AVSEEK_FLAG_BACKWARD;
-					avformat_seek_file(format_ctx.get(), stream_index, INT64_MIN, new_dts, INT64_MAX, flags);
+					avformat_seek_file(format_ctx.get(), stream_index, INT64_MIN, static_cast<int64_t>(new_dts), INT64_MAX, flags);
 					avcodec_flush_buffers(codec_ctx.get());
 					seek_requested = false;
 
@@ -166,7 +166,7 @@ void sdl_callback(void* ptr, Uint8* stream, int len)
 			auto flags = 0;
 			if (new_dts < as->working_frame->pts)
 				flags |= AVSEEK_FLAG_BACKWARD;
-			avformat_seek_file(as->format_ctx.get(), as->stream_index, INT64_MIN, new_dts, INT64_MAX, flags);
+			avformat_seek_file(as->format_ctx.get(), as->stream_index, INT64_MIN, static_cast<int64_t>(new_dts), INT64_MAX, flags);
 			avcodec_flush_buffers(as->codec_ctx.get());
 			as->seek_requested = false;
 
@@ -355,9 +355,9 @@ int AudioStream::synchronize(int nb_samples)
 			// Shrinking/expanding buffer code
 			if (fabs(avg_diff) >= difference_threshold)
 			{
-				wanted_nb_samples = nb_samples + diff * format_ctx->streams[stream_index]->codecpar->sample_rate;
-				min_nb_samples = nb_samples * ((100 - SAMPLE_CORRECTION_PERCENT_MAX) / 100.);
-				max_nb_samples = nb_samples * ((100 + SAMPLE_CORRECTION_PERCENT_MAX) / 100.);
+				wanted_nb_samples = static_cast<int>(nb_samples + diff * format_ctx->streams[stream_index]->codecpar->sample_rate);
+				min_nb_samples = static_cast<int>(nb_samples * ((100ll - SAMPLE_CORRECTION_PERCENT_MAX) / 100.));
+				max_nb_samples = static_cast<int>(nb_samples * ((100ll + SAMPLE_CORRECTION_PERCENT_MAX) / 100.));
 
 				wanted_nb_samples = std::clamp(wanted_nb_samples, min_nb_samples, max_nb_samples);
 			}
@@ -366,7 +366,7 @@ int AudioStream::synchronize(int nb_samples)
 	else
 	{
 		// difference is Too big; reset diff stuff
-		average_differance_count = 0.;
+		average_differance_count = 0;
 		cummulative_difference = 0.;
 	}
 

@@ -17,8 +17,6 @@ extern "C" {
 
 #include <SDL2/SDL.h>
 
-#include "jthread/source/jthread.hpp"
-
 #include "Deleters.h"
 #include "Renderer.h"
 

@@ -4,7 +4,8 @@
 
 #include <algorithm>
 #include <numeric>
-#include <utf8.h>
+
+#include <utf8cpp/utf8.h>
 
 using namespace std::string_literals;
 
@@ -14,7 +15,7 @@ void FontManager::Initialize()
 	{
 		if (!exists(directory))
 		{
-			spdlog::debug(L"FontManager: "s + directory.c_str() + L" does not exist. Skipping.");
+			spdlog::debug(L"FontManager: {} does not exist. Skipping.", directory.native());
 			continue;
 		}
 

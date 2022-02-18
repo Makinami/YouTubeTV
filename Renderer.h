@@ -84,6 +84,18 @@ namespace Renderer
 			ActualPixelsPoint(RemPoint other);
 
 			ActualPixelsPoint& operator -=(const RemPoint& other);
+
+			/*std::partial_ordering operator<=>(const ActualPixelsSize& other) const
+			{
+				if (x == other.x && y == other.y) return std::partial_ordering::equivalent;
+				return std::partial_ordering::unordered;
+			}*/
+
+			bool operator==(const ActualPixelsPoint& other) const
+			{
+				return x == other.x && y == other.y;
+			}
+			//bool operator!=(const ActualPixelsPoint&) const = default;
 		};
 
 		inline ActualPixelsPoint operator- (ActualPixelsPoint x, const RemPoint& y) { x -= y; return x; }
@@ -165,20 +177,20 @@ namespace Renderer
 	struct Color
 	{
 		uint8_t r{ 0 }, g{ 0 }, b{ 0 }, a{ 1 };
-		Color() {};
-		Color(float _r, float _g, float _b, float _a = 1.f)
+		constexpr Color() {};
+		constexpr Color(float _r, float _g, float _b, float _a = 1.f)
 			: r(std::clamp(static_cast<int>(_r * 255), 0, 255)),
 			g(std::clamp(static_cast<int>(_g * 255), 0, 255)),
 			b(std::clamp(static_cast<int>(_b * 255), 0, 255)),
 			a(std::clamp(static_cast<int>(_a * 255), 0, 255))
 		{}
-		Color(int _r, int _g, int _b, int _a = 255)
+		constexpr Color(int _r, int _g, int _b, int _a = 255)
 			: r(std::clamp(_r, 0, 255)),
 			g(std::clamp(_g, 0, 255)),
 			b(std::clamp(_b, 0, 255)),
 			a(std::clamp(_a, 0, 255))
 		{}
-		operator SDL_Color() const { return { r, g, b, a }; }
+		constexpr operator SDL_Color() const { return { r, g, b, a }; }
 	};
 }
 
@@ -200,7 +212,7 @@ public:
 			: x(_x), y(_y), w(_w), h(_h)
 		{}
 		Rectangle(SDL_Rect rect)
-			: x(rect.x), y(rect.y), w(rect.w), h(rect.h)
+			: x{ static_cast<float>(rect.x) }, y{ static_cast<float>(rect.y) }, w{ static_cast<float>(rect.w) }, h{ static_cast<float>(rect.h) }
 		{}
 		Rectangle(SDL_FRect rect)
 			: x(rect.x), y(rect.y), w(rect.w), h(rect.h)
@@ -240,12 +252,12 @@ public:
 		scaled_width = height * ratio;
 		if (scaled_width > width)
 		{
-			scaled_width = width;
+			scaled_width = static_cast<float>(width);
 			scaled_height = scaled_width / ratio;
 		}
 		else
 		{
-			scaled_height = height;
+			scaled_height = static_cast<float>(height);
 		}
 	}
 	auto GetSize() const -> Dimensions
@@ -256,7 +268,7 @@ public:
 	auto CopyTexture(SDL_Texture* texture, const SDL_Rect* srcrect, const SDL_Rect* dstrect, Renderer::Color color = { 255, 255, 255, 0 }) -> int;
 	auto CopyTexture(SDL_Texture* texture, const SDL_Rect srcrect, const SDL_Rect dstrect, Renderer::Color color = { 255, 255, 255, 0 }) -> int;
 	auto CopyTexture(SDL_Texture* texture, const Renderer::Dimensions::ActualPixelsRectangle srcrect, const Renderer::Dimensions::ActualPixelsRectangle dstrect, Renderer::Color color = { 255, 255, 255, 0 }) -> int;
-	
+
 	auto DrawBox(Renderer::Dimensions::ActualPixelsRectangle rect, Renderer::Color color) -> int;
 
 	auto Present() -> void;
