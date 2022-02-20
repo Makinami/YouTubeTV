@@ -168,3 +168,5 @@ ServiceFabricBackup/
 *.mp4
 *.ppm
 audio_dump.bin
+
+vcpkg_installed

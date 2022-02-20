@@ -515,6 +515,7 @@ int SystemCapture(
 
 YouTubeVideo::YouTubeVideo(string id, GuardedRenderer& renderer, int media_type)
 {
+	id = "niqHn6vEwy4";
 	string out;
 	string err;
 	uint32_t code;
@@ -530,8 +531,9 @@ YouTubeVideo::YouTubeVideo(string id, GuardedRenderer& renderer, int media_type)
 			return format["vcodec"].get<string>() != "none";
 		});
 		if (video_format != media_details["requested_formats"].end())
-			video_stream = make_unique<VideoStream>((*video_format)["url"].get<string>(), renderer, clock);
-			//video_stream = make_unique<VideoStream>("video.mp4", renderer, clock);
+			//video_stream = make_unique<VideoStream>((*video_format)["url"].get<string>(), renderer, clock);
+			video_stream = make_unique<VideoStream>("video.mp4", renderer, clock);
+			//video_stream = make_unique<VideoStream>("jazz4k.mp4", renderer, clock);
 	}
 
 	if (media_type & Audio)
@@ -540,8 +542,9 @@ YouTubeVideo::YouTubeVideo(string id, GuardedRenderer& renderer, int media_type)
 			return format["acodec"].get<string>() != "none";
 		});
 		if (audio_format != media_details["requested_formats"].end())
-			audio_stream = make_unique<AudioStream>((*audio_format)["url"].get<string>(), clock);
-		//audio_stream = make_unique<AudioStream>("audio.webm", clock);
+			//audio_stream = make_unique<AudioStream>((*audio_format)["url"].get<string>(), clock);
+			audio_stream = make_unique<AudioStream>("audio.webm", clock);
+			//audio_stream = make_unique<AudioStream>("jazz4k.mp4", clock);
 	}
 }
 
@@ -589,4 +592,109 @@ auto YouTubeVideo::get_video_frame() -> decltype(std::declval<VideoStream>().get
 	if (!video_stream)
 		throw std::runtime_error("Media does not have active video stream");
 	return video_stream->get_frame();
+}
+
+struct FileAVIO : CustomAVIO
+{
+	FileAVIO(std::string filename) : file(std::move(filename), std::ios_base::binary)
+	{
+		spdlog::debug("Open {} file (current size: {})", filename, size());
+	}
+
+	int read_packet(uint8_t* buf, int buf_size) noexcept
+	{
+		try {
+			file.read(buf, buf_size);
+			return file.gcount();
+		} catch (...) { return -1; }
+	}
+
+	int64_t seek(int64_t offset, int whence) noexcept
+	{
+		try {
+			switch (whence)
+			{
+			case SEEK_SET:
+				file.seekg(offset, std::ios_base::beg);
+				return file.tellg();
+			case SEEK_CUR:
+				file.seekg(offset, std::ios_base::cur);
+				return file.tellg();
+			case SEEK_END:
+				file.seekg(offset, std::ios_base::end);
+				return file.tellg();
+			case AVSEEK_SIZE:
+			default:
+				return -1;
+			}
+		} catch (...) { return -1; }
+	}
+	std::basic_ifstream<uint8_t> file;
+
+private:
+	int64_t size()
+	{
+		auto pos = file.tellg();
+		file.seekg(0, std::ios_base::end);
+		auto size = file.tellg();
+		file.seekg(pos);
+		return size;
+	}
+};
+
+int read_packet(void* opaque, uint8_t* buf, int buf_size) noexcept
+{
+	return reinterpret_cast<CustomAVIO*>(opaque)->read_packet(buf, buf_size);
+}
+
+inline int64_t seek(void* opaque, int64_t offset, int whence)
+{
+	return reinterpret_cast<CustomAVIO*>(opaque)->seek(offset, whence);
+}
+
+inline std::unique_ptr<AVFormatContext> avformat_open_input(std::string_view filename)
+{
+	if (filename != "video.mp4")
+	{
+		AVFormatContext* ic = nullptr;
+
+		if (avformat_open_input(&ic, filename.data(), nullptr, nullptr) < 0)
+			throw std::runtime_error("Could not open format input");
+
+		if (avformat_find_stream_info(ic, nullptr) < 0)
+			throw std::runtime_error("Could not read stream info");
+
+		return std::unique_ptr<AVFormatContext>(ic);
+	}
+
+	using namespace bytes_literals;
+
+	// page size as suggested by ffmpeg doxygen
+	//TODO: read dynamically https://en.wikipedia.org/wiki/Page_(computer_memory)#Getting_page_size_programmatically
+	auto buffer_size = 4_KB;
+	auto buffer = static_cast<uint8_t*>(av_malloc(buffer_size));
+
+	auto file = std::make_unique<FileAVIO>(std::string(filename));
+
+	auto ic = std::unique_ptr<AVFormatContext>(avformat_alloc_context());
+	ic->pb = avio_alloc_context(
+		buffer,
+		buffer_size,
+		0,
+		nullptr,
+		read_packet,
+		nullptr,
+		seek
+	);
+	ic->pb->opaque = file.release(); // assign ptr to file here so it'll be cleaned up automatically even in following fails
+
+	auto ic_ptr = ic.get();
+
+	if (avformat_open_input(&ic_ptr, filename.data(), nullptr, nullptr) < 0)
+		throw std::runtime_error("Could not open format input");
+
+	if (avformat_find_stream_info(ic_ptr, nullptr) < 0)
+		throw std::runtime_error("Could not read stream info");
+
+	return ic;
 }

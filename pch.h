@@ -14,6 +14,8 @@
 
 
 #include "Deleters.h"
+#include "Literals.h"
+#include "ErrorHandling.h"
 
 template <typename Arg>
 void _print_assert_comment(Arg&& arg)

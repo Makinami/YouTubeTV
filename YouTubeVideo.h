@@ -215,19 +215,6 @@ private:
 	bool paused = true;
 };
 
-inline std::unique_ptr<AVFormatContext> avformat_open_input(std::string_view filename)
-{
-	AVFormatContext* ic = nullptr;
-
-	if (avformat_open_input(&ic, filename.data(), nullptr, nullptr) < 0)
-		throw std::runtime_error("Could not open format input");
-
-	if (avformat_find_stream_info(ic, nullptr) < 0)
-		throw std::runtime_error("Could not read stream info");
-
-	return std::unique_ptr<AVFormatContext>(ic);
-}
-
 inline std::unique_ptr<AVCodecContext> make_codec_context(const AVCodecParameters* const codecpar)
 {
 	auto ctx = std::unique_ptr<AVCodecContext>{ avcodec_alloc_context3(nullptr) };
@@ -237,6 +224,8 @@ inline std::unique_ptr<AVCodecContext> make_codec_context(const AVCodecParameter
 
 	return ctx;
 }
+
+std::unique_ptr<AVFormatContext> avformat_open_input(std::string_view filename);
 
 template<AVMediaType MEDIA_TYPE>
 inline MediaStream<MEDIA_TYPE>::MediaStream(const std::string& _url, const Clock& _clock)

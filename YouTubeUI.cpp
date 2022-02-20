@@ -359,13 +359,12 @@ YouTube::UI::HomeTab::HomeTab(const nlohmann::json& data)
 	const auto tab_renderer = data["tabRenderer"];
 	title = build_text(tab_renderer["title"]);
 
-	Shelf shelf;
-	shelf = Shelf{};
-
 	spdlog::info("Processing {} tab", title);
 	for (const auto& section_data : tab_renderer["content"]["tvSurfaceContentRenderer"]["content"]["sectionListRenderer"]["contents"])
 	{
-		shelfs.emplace_back(section_data);
+		auto shelf = Shelf{ section_data };
+		if (shelf.size())
+			shelfs.emplace_back(std::move(shelf));
 	}
 	continuation_payload = tab_renderer["content"]["tvSurfaceContentRenderer"]["content"]["sectionListRenderer"]["continuations"][0]["nextContinuationData"]["continuation"];
 	spdlog::info("{} tab loaded", title);
@@ -528,7 +527,6 @@ auto YouTube::UI::MediaItem::create(const nlohmann::json& data) -> std::unique_p
 		return nullptr;
 	}
 
-	//spdlog::info("Processing {} - {} media item", build_text(data.begin().value()["title"]), data.begin().key());
 	try
 	{
 		switch (it->second)

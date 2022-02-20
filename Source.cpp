@@ -38,11 +38,39 @@ using namespace YouTube;
 
 int main(int argc, char *argv[])
 {
+	/*pplx::cancellation_token_source ctx;
+
+	auto task = pplx::task<void>([] {
+		std::cout << "one\n";
+	}, ctx.get_token()).then([&] {
+		std::cout << "two\n";
+		ctx.cancel();
+	}).then([] {
+		std::cout << "three\n";
+	});
+
+	ctx.cancel();
+
+	ctx = {};
+
+	task = pplx::task<void>([] {
+		std::cout << "one\n";
+	}, ctx.get_token()).then([&] {
+		std::cout << "two\n";
+		ctx.cancel();
+	}).then([] {
+		std::cout << "three\n";
+	});
+
+	task.wait();
+
+	return 0;*/
+
 	{
 		std::vector<spdlog::sink_ptr> sinks;
 		sinks.emplace_back([]() {
 			auto sink = std::make_unique<spdlog::sinks::stdout_color_sink_mt>();
-			sink->set_level(spdlog::level::info);
+			sink->set_level(spdlog::level::debug);
 			return sink;
 		}());
 		sinks.emplace_back([]() {
@@ -54,6 +82,8 @@ int main(int argc, char *argv[])
 		spdlog::set_default_logger(std::move(logger));
 		spdlog::set_level(spdlog::level::trace);
 	}
+
+	av_log_set_level(AV_LOG_VERBOSE);
 
 	YouTube::YouTubeCoreRAII yt_core;
 

@@ -39,6 +39,7 @@
     <ClInclude Include="Deleters.h" />
     <ClInclude Include="FontManager.h" />
     <ClInclude Include="ImageManager.h" />
+    <ClInclude Include="Literals.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="TextRenderer.h" />
